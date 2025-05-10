@@ -1,17 +1,14 @@
 ﻿using System.Text;
 using dotnetstandard_bip39;
 using NSec.Cryptography;
+using Susurri.Modules.IAM.Core.Abstractions;
 using Susurri.Modules.IAM.Core.Exceptions;
 
 namespace Susurri.Modules.IAM.Core.Keys;
 
-internal sealed class KeyGenerator
+internal sealed class KeyGenerator : IKeyGenerator
 {
-    public PublicKey PublicKey { get; }
-    public Key PrivateKey { get; }
-    public string MnemonicPhrase { get; }
-
-    public KeyGenerator(string passphrase)
+    public Key GenerateKeys(string passphrase)
     {
         // 1. Convert passphrase into deterministic entropy (SHA256 → 32 bytes)
         var passphraseBytes = Encoding.UTF8.GetBytes(passphrase);
@@ -22,10 +19,10 @@ internal sealed class KeyGenerator
 
         // 3. Generate BIP39 mnemonic
         var bip = new BIP39();
-        MnemonicPhrase = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
+        var mnemonicPhrase = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
 
         // 4. Generate BIP39 seed (hex string), then convert it to byte[]
-        var bip39SeedHex = bip.MnemonicToSeedHex(MnemonicPhrase, passphrase);
+        var bip39SeedHex = bip.MnemonicToSeedHex(mnemonicPhrase, passphrase);
         byte[] bip39Seed = ConvertHexToBytes(bip39SeedHex);
 
         // 5. Take the first 32 bytes as the Ed25519 seed
@@ -33,8 +30,9 @@ internal sealed class KeyGenerator
 
         // 6. Generate Ed25519 key pair
         var algorithm = SignatureAlgorithm.Ed25519;
-        PrivateKey = Key.Import(algorithm, ed25519Seed, KeyBlobFormat.RawPrivateKey);
-        PublicKey = PrivateKey.PublicKey;
+        var privateKey = Key.Import(algorithm, ed25519Seed, KeyBlobFormat.RawPrivateKey);
+        
+        return privateKey;
     }
 
     private static byte[] ConvertHexToBytes(string hex)
