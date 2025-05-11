@@ -7,5 +7,7 @@ namespace Susurri.Modules.IAM.Core;
 internal static class Extensions
 {
     public static IServiceCollection AddCore(this IServiceCollection services) 
-        => services.AddSingleton<IKeyGenerator, KeyGenerator>();
+        => services
+            .AddSingleton<IKeyStorage, KeyStorage>()
+            .AddSingleton<IKeyGenerator, KeyGenerator>();
 }
