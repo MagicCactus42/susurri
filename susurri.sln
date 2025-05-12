@@ -21,13 +21,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Shared.Infrastructu
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Users", "Users", "{C3E048FD-EE57-40B5-8E7A-6B77F733308F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.Users.Api", "src\Modules\Users\Susurri.Modules.Users.Api\Susurri.Modules.Users.Api.csproj", "{CB08FC9E-246B-46FC-B6F8-9298F0F4440E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.Users.Application", "src\Modules\Users\Susurri.Modules.Users.Application\Susurri.Modules.Users.Application.csproj", "{CB08FC9E-246B-46FC-B6F8-9298F0F4440E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.Users.Core", "src\Modules\Users\Susurri.Modules.Users.Core\Susurri.Modules.Users.Core.csproj", "{7A27E878-BE0F-415C-84DF-1E5774186691}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "IAM", "IAM", "{D75A3813-B95B-49D0-9A45-90D3B566ED19}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.IAM.Api", "src\Modules\IAM\Susurri.Modules.IAM.Api\Susurri.Modules.IAM.Api.csproj", "{6013CCAA-824B-462D-9B08-469865783241}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.IAM.Application", "src\Modules\IAM\Susurri.Modules.IAM.Application\Susurri.Modules.IAM.Application.csproj", "{6013CCAA-824B-462D-9B08-469865783241}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.IAM.Core", "src\Modules\IAM\Susurri.Modules.IAM.Core\Susurri.Modules.IAM.Core.csproj", "{65BCA912-5256-48C7-AF83-6E30E98D0E12}"
 EndProject

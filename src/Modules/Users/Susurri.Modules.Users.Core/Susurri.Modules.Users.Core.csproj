@@ -9,4 +9,8 @@
       <PackageReference Include="dotnetstandard-bip39" Version="1.0.2" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\..\..\Shared\Susurri.Shared.Infrastructure\Susurri.Shared.Infrastructure.csproj" />
+    </ItemGroup>
+
 </Project>
