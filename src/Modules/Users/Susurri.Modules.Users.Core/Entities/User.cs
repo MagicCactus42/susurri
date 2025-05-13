@@ -6,7 +6,7 @@ public class User
 {
     public UserId UserId { get; private set; }
     public Username Username { get; private set; }
-    public string PublicKey { get; private set; } // maybe change to value object
+    public byte[] PublicKey { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset LastSeenAt { get; private set; }
 }

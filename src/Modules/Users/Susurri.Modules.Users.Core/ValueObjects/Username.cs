@@ -6,6 +6,8 @@ public sealed record Username
 {
     public string Value { get; }
     
+    private Username(){}
+    
     public Username(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length is > 30 or < 3)

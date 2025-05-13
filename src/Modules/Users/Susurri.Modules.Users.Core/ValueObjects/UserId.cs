@@ -6,6 +6,8 @@ public sealed record UserId
 {
     public Guid Value { get; }
 
+    private UserId(){}
+    
     public UserId(Guid value)
     {
         if (value == Guid.Empty)

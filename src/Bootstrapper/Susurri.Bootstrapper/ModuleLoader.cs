@@ -20,7 +20,21 @@ internal static class ModuleLoader
 
     public static IList<IModule> LoadModules(IEnumerable<Assembly> assemblies)
         => assemblies
-            .SelectMany(x => x.GetTypes())
+            .SelectMany(assembly =>
+            {
+                try
+                {
+                    return assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    return ex.Types.Where(t => t != null)!;
+                }
+                catch
+                {
+                    return Enumerable.Empty<Type>();
+                }
+            })
             .Where(x => typeof(IModule).IsAssignableFrom(x) && !x.IsInterface)
             .OrderBy(x => x.Name)
             .Select(Activator.CreateInstance)

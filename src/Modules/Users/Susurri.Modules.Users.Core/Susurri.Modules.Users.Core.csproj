@@ -7,6 +7,10 @@
 
     <ItemGroup>
       <PackageReference Include="dotnetstandard-bip39" Version="1.0.2" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.4" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" Version="9.0.4" />
+      <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+      <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
     </ItemGroup>
 
     <ItemGroup>
