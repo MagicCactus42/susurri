@@ -1,13 +1,19 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Reflection;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
+using Susurri.Shared.Abstractions.Time;
+using Susurri.Shared.Infrastructure.Events;
+using Susurri.Shared.Infrastructure.Time;
 
 [assembly: InternalsVisibleTo("Susurri.Bootstrapper")]
 namespace Susurri.Shared.Infrastructure;
 
 internal static class Extensions
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services)
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IList<Assembly> assemblies)
     {
+        services.AddSingleton<IClock, Clock>();
+        services.AddEvents(assemblies);
         return services;
     }
 }

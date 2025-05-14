@@ -10,4 +10,8 @@
       <ProjectReference Include="..\Susurri.Shared.Abstractions\Susurri.Shared.Abstractions.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="Scrutor" Version="6.0.1" />
+    </ItemGroup>
+
 </Project>

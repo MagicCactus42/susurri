@@ -6,11 +6,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <Folder Include="Auth\" />
-      <Folder Include="Services\" />
-    </ItemGroup>
-
-    <ItemGroup>
       <PackageReference Include="dotnetstandard-bip39" Version="1.0.2" />
       <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
       <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
