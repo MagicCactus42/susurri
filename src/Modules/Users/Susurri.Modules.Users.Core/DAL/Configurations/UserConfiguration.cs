@@ -15,7 +15,7 @@ internal class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.Username)
             .HasConversion(x => x.Value, x => new Username(x))
             .IsRequired();
-        builder.Property(x => x.CreatedAt).HasDefaultValueSql("getdate()");
-        builder.Property(x => x.LastSeenAt).HasDefaultValueSql("getdate()");
+        builder.Property(x => x.CreatedAt);
+        builder.Property(x => x.LastSeenAt);
     }
 }
