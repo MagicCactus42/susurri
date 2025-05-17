@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Susurri.Shared.Abstractions.Events;
+using Susurri.Shared.Abstractions.Modules;
 
 namespace Susurri.Shared.Infrastructure.Modules;
 
@@ -9,6 +10,8 @@ internal static class Extensions
     public static IServiceCollection AddModuleRequest(this IServiceCollection services, IList<Assembly> assemblies)
     {
         services.AddModuleRegistry(assemblies);
+        services.AddSingleton<IModuleSerializer, JsonModuleSerializer>();
+        services.AddSingleton<IModuleClient, ModuleClient>();
 
         return services;
     }
