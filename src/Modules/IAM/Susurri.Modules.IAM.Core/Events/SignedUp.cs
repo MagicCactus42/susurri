@@ -3,4 +3,4 @@ using Susurri.Shared.Abstractions.Messaging;
 
 namespace Susurri.Modules.IAM.Core.Events;
 
-public record CredentialsProvided(byte[] PublicKey, string Username) : IEvent;
+public record SignedUp(byte[] PublicKey, string Username) : IEvent;

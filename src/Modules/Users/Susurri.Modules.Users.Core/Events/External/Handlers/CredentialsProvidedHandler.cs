@@ -1,19 +1,38 @@
 ﻿using Susurri.Modules.Users.Core.Abstractions;
+using Susurri.Modules.Users.Core.Exceptions;
 using Susurri.Shared.Abstractions.Events;
+using Susurri.Shared.Abstractions.Messaging;
 
 namespace Susurri.Modules.Users.Core.Events.External.Handlers;
 
-// internal sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProvided>
-// {
-//     private readonly IUserRepository _userRepository;
-//
-//     public CredentialsProvidedHandler(IUserRepository userRepository)
-//     {
-//         _userRepository = userRepository;
-//     }
-//
-//     public Task HandleAsync(CredentialsProvided @event)
-//     {
-//         
-//     }
-// }
+internal sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProvided>
+{
+    private readonly IUserRepository _userRepository;
+    private readonly IMessageBroker _messageBroker;
+
+    public CredentialsProvidedHandler(IUserRepository userRepository, IMessageBroker messageBroker)
+    {
+        _userRepository = userRepository;
+        _messageBroker = messageBroker;
+    }
+
+    public async Task HandleAsync(CredentialsProvided @event)
+    {
+        var targetKey = await _userRepository.GetKeyByUsernameAsync(@event.Username);
+
+        if (targetKey is null)
+        {
+            throw new UserDoesntExistException(@event.Username);
+        }
+
+        if (@event.PublicKey.Equals(targetKey))
+        {
+            await _messageBroker.PublishAsync();
+        }
+        
+        else
+        {
+            await _messageBroker.PublishAsync();
+        }
+    }
+}

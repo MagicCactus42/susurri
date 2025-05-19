@@ -2,4 +2,4 @@
 
 namespace Susurri.Modules.IAM.Application.Commands;
 
-public record SignUp(string Username, string Passphrase) : ICommand;
+public record SignIn(Guid UserId, string Username, string PublicKey) : ICommand;

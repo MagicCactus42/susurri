@@ -1,5 +1,7 @@
-﻿namespace Susurri.Shared.Abstractions.Events;
+﻿using Susurri.Shared.Abstractions.Messaging;
 
-public interface IEvent
+namespace Susurri.Shared.Abstractions.Events;
+
+public interface IEvent : IMessage
 {
 }

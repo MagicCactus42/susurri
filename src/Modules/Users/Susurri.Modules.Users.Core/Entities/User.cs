@@ -4,9 +4,9 @@ namespace Susurri.Modules.Users.Core.Entities;
 
 public class User
 {
-    public UserId UserId { get; private set; }
-    public Username Username { get; private set; }
-    public byte[] PublicKey { get; private set; }
-    public DateTimeOffset CreatedAt { get; private set; }
-    public DateTimeOffset LastSeenAt { get; private set; }
+    public UserId UserId { get; set; }
+    public Username Username { get; set; }
+    public byte[] PublicKey { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
 }
