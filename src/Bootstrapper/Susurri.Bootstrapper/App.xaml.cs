@@ -1,7 +1,10 @@
-﻿using System.Reflection;
+﻿using System.IO;
+using System.Reflection;
 using System.Windows;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Susurri.Shared.Abstractions.Modules;
+using Susurri.Shared.Infrastructure;
 
 namespace Susurri.Bootstrapper;
 
@@ -42,6 +45,11 @@ public partial class App : Application
 
     private void ConfigureServices(IServiceCollection services)
     {
+        var configuration = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true).Build();
+        services.AddSingleton<IConfiguration>(configuration);
+        
+        services.AddInfrastructure(_assemblies);
         foreach (var module in _modules)
         {
             module.Register(services);

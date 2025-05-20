@@ -8,6 +8,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using Susurri.Modules.IAM.Application.Commands;
+using Susurri.Shared.Abstractions.Commands;
 
 namespace Susurri.Bootstrapper;
 
@@ -16,8 +18,21 @@ namespace Susurri.Bootstrapper;
 /// </summary>
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    private readonly ICommandDispatcher _commandDispatcher;
+    public MainWindow(ICommandDispatcher commandDispatcher)
     {
         InitializeComponent();
+        
+        _commandDispatcher = commandDispatcher;
+        
+        TestSignUp();
+    }
+
+    private async void TestSignUp()
+    {
+        var command = new SignUp("magiccactus42", "begin map mill could harsh man future win heart rapid woman race");
+        await _commandDispatcher.SendAsync(command);
+        
+        MessageBox.Show("Sign up succeeded");
     }
 }

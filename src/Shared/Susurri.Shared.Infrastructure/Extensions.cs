@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Susurri.Shared.Abstractions.Time;
+using Susurri.Shared.Infrastructure.Commands;
 using Susurri.Shared.Infrastructure.Events;
 using Susurri.Shared.Infrastructure.Messaging;
 using Susurri.Shared.Infrastructure.Modules;
@@ -16,6 +17,7 @@ internal static class Extensions
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IList<Assembly> assemblies)
     {
         services.AddMessaging();
+        services.AddCommands(assemblies);
         services.AddModuleRequest(assemblies);
         services.AddSingleton<IClock, Clock>();
         services.AddEvents(assemblies);
