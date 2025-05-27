@@ -20,7 +20,17 @@ internal static class Extensions
     {
         var registry = new ModuleRegistry();
 
-        var types = assemblies.SelectMany(x => x.GetTypes()).ToArray();
+        var types = assemblies.SelectMany(a =>
+        {
+            try
+            {
+                return a.GetTypes();
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                return ex.Types.Where(t => t != null)!;
+            }
+        }).ToArray();
 
         var eventTypes = types.Where(x => x.IsClass && typeof(IEvent).IsAssignableFrom(x)).ToArray();
 

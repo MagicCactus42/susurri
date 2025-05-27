@@ -8,6 +8,7 @@
     <ItemGroup>
       <PackageReference Include="dotnetstandard-bip39" Version="1.0.2" />
       <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.4" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.4" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" Version="9.0.4" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.4">
         <PrivateAssets>all</PrivateAssets>

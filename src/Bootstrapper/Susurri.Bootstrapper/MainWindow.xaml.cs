@@ -19,6 +19,8 @@ namespace Susurri.Bootstrapper;
 public partial class MainWindow : Window
 {
     private readonly ICommandDispatcher _commandDispatcher;
+    
+    public MainWindow(){}
     public MainWindow(ICommandDispatcher commandDispatcher)
     {
         InitializeComponent();
