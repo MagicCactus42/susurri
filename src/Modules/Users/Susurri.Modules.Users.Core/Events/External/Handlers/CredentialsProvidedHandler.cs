@@ -27,12 +27,12 @@ internal sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProv
 
         if (@event.PublicKey.Equals(targetKey))
         {
-            await _messageBroker.PublishAsync();
+            await _messageBroker.PublishAsync(new LoggedIn(@event.Username, @event.PublicKey));
         }
         
         else
         {
-            await _messageBroker.PublishAsync();
+            await _messageBroker.PublishAsync(new SignedUp(@event.PublicKey, @event.Username));
         }
     }
 }

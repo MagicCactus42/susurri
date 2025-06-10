@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using Microsoft.Extensions.Logging;
 using Susurri.Modules.IAM.Application.Commands;
 using Susurri.Shared.Abstractions.Commands;
 
@@ -19,22 +20,22 @@ namespace Susurri.Bootstrapper;
 public partial class MainWindow : Window
 {
     private readonly ICommandDispatcher _commandDispatcher;
+    private readonly ILogger<MainWindow> _logger;
     
-    public MainWindow(){}
-    public MainWindow(ICommandDispatcher commandDispatcher)
+    public MainWindow(ICommandDispatcher commandDispatcher, ILogger<MainWindow> logger)
     {
         InitializeComponent();
         
         _commandDispatcher = commandDispatcher;
-        
+        _logger = logger;
+
         TestSignUp();
     }
 
     private async void TestSignUp()
     {
-        var command = new SignUp("magiccactus42", "begin map mill could harsh man future win heart rapid woman race");
+        var command = new Login("magiccactus42", "begin map mill could harsh man future win heart rapid woman race");
         await _commandDispatcher.SendAsync(command);
-        
-        MessageBox.Show("Sign up succeeded");
+        _logger.LogInformation("sign up tested");
     }
 }

@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Windows;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Susurri.Shared.Abstractions.Modules;
 using Susurri.Shared.Infrastructure;
 
@@ -48,6 +49,8 @@ public partial class App : Application
         var configuration = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true).Build();
         services.AddSingleton<IConfiguration>(configuration);
+
+        services.AddLogging(c => c.AddConsole());
         
         services.AddInfrastructure(_assemblies);
         foreach (var module in _modules)
