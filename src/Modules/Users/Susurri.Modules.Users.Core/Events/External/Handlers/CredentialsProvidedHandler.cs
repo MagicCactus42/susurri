@@ -5,7 +5,7 @@ using Susurri.Shared.Abstractions.Messaging;
 
 namespace Susurri.Modules.Users.Core.Events.External.Handlers;
 
-internal sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProvided>
+public sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProvided>
 {
     private readonly IUserRepository _userRepository;
     private readonly IMessageBroker _messageBroker;
@@ -22,17 +22,12 @@ internal sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProv
 
         if (targetKey is null)
         {
-            throw new UserDoesntExistException(@event.Username);
+            await _messageBroker.PublishAsync(new SignedUp(@event.PublicKey, @event.Username));
         }
 
         if (@event.PublicKey.Equals(targetKey))
         {
             await _messageBroker.PublishAsync(new LoggedIn(@event.Username, @event.PublicKey));
-        }
-        
-        else
-        {
-            await _messageBroker.PublishAsync(new SignedUp(@event.PublicKey, @event.Username));
         }
     }
 }

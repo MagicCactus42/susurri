@@ -23,7 +23,8 @@ public class LoginHandler : ICommandHandler<Login>
     public async Task HandleAsync(Login command)
     {
         var key = _keyGenerator.GenerateKeys(command.Passphrase);
+        var username = command.Username;
 
-        await _messageBroker.PublishAsync(new CredentialsProvided(key.PublicKey.Export(KeyBlobFormat.RawPublicKey), command.Username));
+        await _messageBroker.PublishAsync(new CredentialsProvided(key.PublicKey.Export(KeyBlobFormat.RawPublicKey), username));
     }
 }

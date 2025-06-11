@@ -6,7 +6,7 @@ using Susurri.Shared.Abstractions.Time;
 
 namespace Susurri.Modules.Users.Core.Events.External.Handlers;
 
-internal sealed class SignedUpHandler : IEventHandler<SignedUp>
+public sealed class SignedUpHandler : IEventHandler<SignedUp>
 {
     private readonly IUserRepository _userRepository;
     private readonly ILogger<SignedUpHandler> _logger;
