@@ -2,7 +2,9 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Susurri.Shared.Abstractions.Auth;
 using Susurri.Shared.Abstractions.Time;
+using Susurri.Shared.Infrastructure.Auth;
 using Susurri.Shared.Infrastructure.Commands;
 using Susurri.Shared.Infrastructure.Events;
 using Susurri.Shared.Infrastructure.Messaging;
@@ -20,6 +22,7 @@ internal static class Extensions
         services.AddCommands(assemblies);
         services.AddModuleRequest(assemblies);
         services.AddSingleton<IClock, Clock>();
+        services.AddSingleton<ISignatureManager, SignatureManager>();
         services.AddEvents(assemblies);
         return services;
     }
