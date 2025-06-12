@@ -1,8 +1,10 @@
-﻿using System.Text;
+﻿using System.Security.Cryptography;
+using System.Text;
 using dotnetstandard_bip39;
 using NSec.Cryptography;
 using Susurri.Modules.IAM.Core.Abstractions;
 using Susurri.Modules.IAM.Core.Exceptions;
+using Aes = System.Runtime.Intrinsics.X86.Aes;
 
 namespace Susurri.Modules.IAM.Core.Keys;
 

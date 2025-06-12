@@ -11,6 +11,8 @@ internal static class Extensions
 {
     public static IServiceCollection AddCore(this IServiceCollection services) 
         => services
+            .AddSingleton<IInMemoryCredentialsCache, InMemoryCredentialsCache>()
+            .AddSingleton<ICredentialsCache, CredentialsCache>()
             .AddSingleton<IKeyStorage, KeyStorage>()
             .AddSingleton<IKeyGenerator, KeyGenerator>();
 }
