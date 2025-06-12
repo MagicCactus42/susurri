@@ -1,6 +1,8 @@
-﻿namespace Susurri.Modules.Users.Core.Exceptions;
+﻿using Susurri.Shared.Abstractions.Exceptions;
 
-public class InvalidPassphraseException : CustomException
+namespace Susurri.Modules.Users.Core.Exceptions;
+
+public class InvalidPassphraseException : SusurriException
 {
     public InvalidPassphraseException() : base($"Passphrase must contain between 8 and 16 words.")
     {

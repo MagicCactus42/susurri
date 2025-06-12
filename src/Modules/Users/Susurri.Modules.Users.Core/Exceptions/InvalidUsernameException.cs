@@ -1,6 +1,8 @@
-﻿namespace Susurri.Modules.Users.Core.Exceptions;
+﻿using Susurri.Shared.Abstractions.Exceptions;
 
-public sealed class InvalidUsernameException : CustomException
+namespace Susurri.Modules.Users.Core.Exceptions;
+
+public sealed class InvalidUsernameException : SusurriException
 {
     public InvalidUsernameException(string username) : base($"Username: {username} is invalid.")
     {

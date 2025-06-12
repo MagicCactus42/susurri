@@ -1,6 +1,8 @@
-﻿namespace Susurri.Modules.IAM.Core.Exceptions;
+﻿using Susurri.Shared.Abstractions.Exceptions;
 
-public class InvalidHexStringLengthException : CustomException
+namespace Susurri.Modules.IAM.Core.Exceptions;
+
+public class InvalidHexStringLengthException : SusurriException
 {
     public InvalidHexStringLengthException() : base($"Hex string length must be even.")
     {

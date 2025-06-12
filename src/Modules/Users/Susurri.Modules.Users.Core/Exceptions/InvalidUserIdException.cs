@@ -1,6 +1,8 @@
-﻿namespace Susurri.Modules.Users.Core.Exceptions;
+﻿using Susurri.Shared.Abstractions.Exceptions;
 
-public class InvalidUserIdException : CustomException
+namespace Susurri.Modules.Users.Core.Exceptions;
+
+public class InvalidUserIdException : SusurriException
 {
     public InvalidUserIdException(Guid userId) : base($"User id: {userId} is invalid}}")
     {

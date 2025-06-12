@@ -14,8 +14,4 @@
       <PackageReference Include="Scrutor" Version="6.0.1" />
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="Auth\" />
-    </ItemGroup>
-
 </Project>
