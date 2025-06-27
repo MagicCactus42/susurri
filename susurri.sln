@@ -37,6 +37,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.DHT.Applica
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Modules.DHT.Core", "src\Modules\DHT\Susurri.Modules.DHT.Core\Susurri.Modules.DHT.Core.csproj", "{6799B138-A64E-4E41-97CE-1AC7B5F4FCF8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Susurri.Tests.Unit", "tests\Susurri.Tests.Unit\Susurri.Tests.Unit.csproj", "{D4665C59-1F33-4C0B-986A-77EB918DD362}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -61,6 +63,7 @@ Global
 		{2B2BE7FC-3A76-4DB5-8D8A-247C85F2EF88} = {9187DDDD-D52E-4A42-9AE2-A2AEFF2E0612}
 		{3CA671DD-670A-4475-9BF7-5CE681E068E9} = {2B2BE7FC-3A76-4DB5-8D8A-247C85F2EF88}
 		{6799B138-A64E-4E41-97CE-1AC7B5F4FCF8} = {2B2BE7FC-3A76-4DB5-8D8A-247C85F2EF88}
+		{D4665C59-1F33-4C0B-986A-77EB918DD362} = {A25F5F4B-1DA0-4575-BDCD-826FF82CD1E1}
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{A35756F5-0958-477A-A36D-1A147F7E588D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -99,5 +102,9 @@ Global
 		{6799B138-A64E-4E41-97CE-1AC7B5F4FCF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6799B138-A64E-4E41-97CE-1AC7B5F4FCF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6799B138-A64E-4E41-97CE-1AC7B5F4FCF8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4665C59-1F33-4C0B-986A-77EB918DD362}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4665C59-1F33-4C0B-986A-77EB918DD362}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4665C59-1F33-4C0B-986A-77EB918DD362}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4665C59-1F33-4C0B-986A-77EB918DD362}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
