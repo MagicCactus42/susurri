@@ -1,0 +1,122 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Susurri.GUI.ViewModels"
+             x:Class="Susurri.GUI.Views.DashboardView"
+             x:DataType="vm:DashboardViewModel">
+
+    <ScrollViewer>
+        <StackPanel Spacing="24" MaxWidth="600">
+            <!-- Header -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="Dashboard"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           Foreground="{StaticResource TextPrimaryBrush}" />
+                <TextBlock Text="Manage your DHT node and connections"
+                           FontSize="14"
+                           Foreground="{StaticResource TextMutedBrush}" />
+            </StackPanel>
+
+            <!-- Identity Card -->
+            <Border Classes="card">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Your Identity"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}" />
+
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="Username:"
+                                       Width="80"
+                                       Foreground="{StaticResource TextMutedBrush}" />
+                            <TextBlock Text="{Binding AppState.Username}"
+                                       Foreground="{StaticResource TextSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="Public Key:"
+                                       Width="80"
+                                       Foreground="{StaticResource TextMutedBrush}" />
+                            <TextBlock Text="{Binding PublicKeyDisplay}"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontFamily="Consolas, monospace"
+                                       FontSize="12" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- DHT Node Card -->
+            <Border Classes="card">
+                <StackPanel Spacing="16">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <TextBlock Text="DHT Node"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimaryBrush}" />
+                        <Border CornerRadius="4" Padding="8,4"
+                                Background="{StaticResource BackgroundTertiaryBrush}">
+                            <TextBlock FontSize="12"
+                                       Foreground="{StaticResource TextSecondaryBrush}">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="{}{0}">
+                                        <Binding Path="AppState.IsDhtRunning" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Port Config -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Port"
+                                   FontSize="13"
+                                   Foreground="{StaticResource TextMutedBrush}" />
+                        <NumericUpDown Value="{Binding DhtPort}"
+                                       Minimum="1024"
+                                       Maximum="65535"
+                                       Width="120"
+                                       HorizontalAlignment="Left"
+                                       IsEnabled="{Binding !AppState.IsDhtRunning}" />
+                    </StackPanel>
+
+                    <!-- Node ID when running -->
+                    <StackPanel Spacing="4" IsVisible="{Binding AppState.IsDhtRunning}">
+                        <TextBlock Text="Node ID"
+                                   FontSize="13"
+                                   Foreground="{StaticResource TextMutedBrush}" />
+                        <TextBlock Text="{Binding AppState.DhtNodeId}"
+                                   FontFamily="Consolas, monospace"
+                                   FontSize="12"
+                                   Foreground="{StaticResource TextSecondaryBrush}" />
+                    </StackPanel>
+
+                    <!-- Controls -->
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Start Node"
+                                Command="{Binding StartDhtCommand}"
+                                Classes="primary"
+                                IsVisible="{Binding !AppState.IsDhtRunning}" />
+                        <Button Content="Stop Node"
+                                Command="{Binding StopDhtCommand}"
+                                Classes="secondary"
+                                IsVisible="{Binding AppState.IsDhtRunning}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Status Message -->
+            <TextBlock Text="{Binding StatusMessage}"
+                       FontSize="13"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <!-- Logout -->
+            <Button Content="Logout"
+                    Command="{Binding LogoutCommand}"
+                    Classes="ghost"
+                    Foreground="{StaticResource ErrorBrush}"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

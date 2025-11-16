@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia.ReactiveUI" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Application\Susurri.Modules.IAM.Application.csproj" />
+    <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Core\Susurri.Modules.IAM.Core.csproj" />
+    <ProjectReference Include="..\..\Modules\DHT\Susurri.Modules.DHT.Core\Susurri.Modules.DHT.Core.csproj" />
+    <ProjectReference Include="..\..\Shared\Susurri.Shared.Abstractions\Susurri.Shared.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Shared\Susurri.Shared.Infrastructure\Susurri.Shared.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

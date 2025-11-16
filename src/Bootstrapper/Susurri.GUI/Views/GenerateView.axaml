@@ -1,0 +1,102 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Susurri.GUI.ViewModels"
+             x:Class="Susurri.GUI.Views.GenerateView"
+             x:DataType="vm:GenerateViewModel">
+
+    <StackPanel Spacing="24" MaxWidth="500" VerticalAlignment="Center" HorizontalAlignment="Center">
+        <!-- Header -->
+        <StackPanel Spacing="4" HorizontalAlignment="Center">
+            <TextBlock Text="Generate Passphrase"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Create a secure BIP39 mnemonic passphrase"
+                       FontSize="14"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Word Count Selection -->
+        <Border Classes="card">
+            <StackPanel Spacing="12">
+                <TextBlock Text="Word Count"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimaryBrush}" />
+                <ComboBox ItemsSource="{Binding WordCountOptions}"
+                          SelectedItem="{Binding WordCount}"
+                          Width="120"
+                          HorizontalAlignment="Left" />
+                <TextBlock FontSize="12"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           TextWrapping="Wrap">
+                    <Run Text="More words = more security. 12 words provides 128 bits of entropy." />
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- Generate Button -->
+        <Button Content="Generate New Passphrase"
+                Command="{Binding GenerateCommand}"
+                Classes="primary"
+                HorizontalAlignment="Center"
+                Padding="24,12" />
+
+        <!-- Generated Result -->
+        <Border Classes="card"
+                IsVisible="{Binding GeneratedPassphrase, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <StackPanel Spacing="12">
+                <TextBlock Text="Your Passphrase"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource TextPrimaryBrush}" />
+
+                <Border Background="{StaticResource BackgroundPrimaryBrush}"
+                        CornerRadius="6"
+                        Padding="16">
+                    <TextBox Text="{Binding GeneratedPassphrase}"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas, monospace"
+                             FontSize="14"
+                             Foreground="{StaticResource AccentBrush}"
+                             Background="Transparent"
+                             BorderThickness="0" />
+                </Border>
+
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Command="{Binding CopyCommand}"
+                            Classes="secondary">
+                        <TextBlock Text="Copy to Clipboard" />
+                    </Button>
+                </StackPanel>
+
+                <!-- Copied indicator -->
+                <TextBlock Text="Copied!"
+                           FontSize="12"
+                           Foreground="{StaticResource SuccessBrush}"
+                           IsVisible="{Binding Copied}" />
+
+                <Border Background="#FEF3C720"
+                        CornerRadius="6"
+                        Padding="12">
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="12"
+                               Foreground="#FEF3C7">
+                        <Run FontWeight="SemiBold" Text="Important:" />
+                        <Run Text=" Write this passphrase down and store it securely. You cannot recover your account without it." />
+                    </TextBlock>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- Status -->
+        <TextBlock Text="{Binding StatusMessage}"
+                   FontSize="13"
+                   Foreground="{StaticResource TextMutedBrush}"
+                   HorizontalAlignment="Center"
+                   IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </StackPanel>
+</UserControl>
