@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AssemblyName>susurri-cli</AssemblyName>
+        <RootNamespace>Susurri.CLI</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Modules\DHT\Susurri.Modules.DHT.Core\Susurri.Modules.DHT.Core.csproj" />
+        <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Application\Susurri.Modules.IAM.Application.csproj" />
+        <ProjectReference Include="..\..\Modules\Users\Susurri.Modules.Users.Application\Susurri.Modules.Users.Application.csproj" />
+        <ProjectReference Include="..\..\Shared\Susurri.Shared.Infrastructure\Susurri.Shared.Infrastructure.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.4" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.4" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="appsettings.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+</Project>

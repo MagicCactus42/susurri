@@ -1,0 +1,121 @@
+# Maintainer: Susurri Team <contact@susurri.io>
+pkgname=susurri
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Secure P2P Chat with DHT-based peer discovery and onion routing"
+arch=('x86_64')
+url="https://github.com/susurri/susurri"
+license=('MIT')
+depends=('dotnet-runtime>=10.0' 'libsodium' 'libx11' 'libxcursor' 'libxrandr' 'libxi' 'mesa')
+makedepends=('dotnet-sdk>=10.0' 'git')
+optdepends=(
+    'libnotify: Desktop notifications'
+)
+provides=('susurri')
+conflicts=('susurri-git')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/susurri/susurri/archive/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    # Restore dependencies
+    dotnet restore
+
+    # Build the CLI application
+    dotnet publish \
+        src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj \
+        -c Release \
+        -r linux-x64 \
+        --self-contained false \
+        -o "${srcdir}/publish-cli"
+
+    # Build the GUI application
+    dotnet publish \
+        src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj \
+        -c Release \
+        -r linux-x64 \
+        --self-contained false \
+        -o "${srcdir}/publish-gui"
+}
+
+package() {
+    # Install CLI files
+    install -dm755 "${pkgdir}/opt/${pkgname}"
+    cp -r "${srcdir}/publish-cli/"* "${pkgdir}/opt/${pkgname}/"
+    chmod 755 "${pkgdir}/opt/${pkgname}/susurri-cli"
+
+    # Install GUI files
+    install -dm755 "${pkgdir}/opt/${pkgname}/gui"
+    cp -r "${srcdir}/publish-gui/"* "${pkgdir}/opt/${pkgname}/gui/"
+    chmod 755 "${pkgdir}/opt/${pkgname}/gui/Susurri.GUI"
+
+    # Create CLI launcher script
+    install -dm755 "${pkgdir}/usr/bin"
+    cat > "${pkgdir}/usr/bin/${pkgname}" << 'EOF'
+#!/bin/bash
+exec /opt/susurri/susurri-cli "$@"
+EOF
+    chmod 755 "${pkgdir}/usr/bin/${pkgname}"
+
+    # Create GUI launcher script
+    cat > "${pkgdir}/usr/bin/${pkgname}-gui" << 'EOF'
+#!/bin/bash
+# Susurri GUI Launcher - Avalonia Desktop Application
+exec /opt/susurri/gui/Susurri.GUI "$@"
+EOF
+    chmod 755 "${pkgdir}/usr/bin/${pkgname}-gui"
+
+    # Install desktop entry for GUI
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/${pkgname}.desktop" << EOF
+[Desktop Entry]
+Name=Susurri
+Comment=Secure P2P Chat with DHT and Onion Routing
+Exec=/usr/bin/${pkgname}-gui
+Icon=${pkgname}
+Terminal=false
+Type=Application
+Categories=Network;Chat;InstantMessaging;Security;
+Keywords=chat;p2p;secure;encrypted;privacy;
+StartupNotify=true
+StartupWMClass=Susurri.GUI
+EOF
+
+    # Install desktop entry for Terminal mode
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/${pkgname}-terminal.desktop" << EOF
+[Desktop Entry]
+Name=Susurri (Terminal)
+Comment=Secure P2P Chat - Terminal Interface
+Exec=/usr/bin/${pkgname}
+Icon=${pkgname}
+Terminal=true
+Type=Application
+Categories=Network;Chat;InstantMessaging;Security;
+Keywords=chat;p2p;secure;encrypted;privacy;cli;terminal;
+StartupNotify=true
+EOF
+
+    # Install icon (SVG)
+    install -dm755 "${pkgdir}/usr/share/icons/hicolor/scalable/apps"
+    cat > "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${pkgname}.svg" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366F1"/>
+      <stop offset="100%" style="stop-color:#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <path d="M128 48 C72 48 48 96 48 128 C48 160 72 192 128 192 L128 224 L160 192 C200 192 224 160 224 128 C224 96 200 48 128 48 Z"
+        fill="white" opacity="0.9"/>
+  <circle cx="96" cy="128" r="16" fill="#6366F1"/>
+  <circle cx="144" cy="128" r="16" fill="#6366F1"/>
+  <circle cx="192" cy="128" r="16" fill="#6366F1"/>
+</svg>
+EOF
+
+    # Install license
+    install -Dm644 "${srcdir}/${pkgname}-${pkgver}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE" 2>/dev/null || true
+}

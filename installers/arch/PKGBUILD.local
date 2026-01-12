@@ -1,0 +1,129 @@
+# Maintainer: Susurri Team <contact@susurri.io>
+# Local development PKGBUILD - builds from local source
+# Usage: makepkg -si
+
+pkgname=susurri-local
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Secure P2P Chat with DHT-based peer discovery and onion routing (local build)"
+arch=('x86_64')
+url="https://github.com/susurri/susurri"
+license=('MIT')
+depends=('dotnet-runtime>=10.0' 'libsodium' 'libx11' 'libxcursor' 'libxrandr' 'libxi' 'mesa')
+makedepends=('dotnet-sdk>=10.0')
+optdepends=(
+    'libnotify: Desktop notifications'
+)
+provides=('susurri')
+conflicts=('susurri' 'susurri-git')
+
+# Path to local source - update this to your local path
+_srcpath="/home/magiccactus/RiderProjects/susurri"
+
+build() {
+    cd "${_srcpath}"
+
+    # Restore and build the CLI application
+    dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
+    dotnet publish \
+        src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj \
+        -c Release \
+        -r linux-x64 \
+        --self-contained false \
+        -o "${srcdir}/publish-cli"
+
+    # Restore and build the GUI application
+    dotnet restore src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj
+    dotnet publish \
+        src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj \
+        -c Release \
+        -r linux-x64 \
+        --self-contained false \
+        -o "${srcdir}/publish-gui"
+}
+
+package() {
+    # Install CLI files
+    install -dm755 "${pkgdir}/opt/susurri"
+    cp -r "${srcdir}/publish-cli/"* "${pkgdir}/opt/susurri/"
+    chmod 755 "${pkgdir}/opt/susurri/susurri-cli"
+
+    # Install GUI files
+    install -dm755 "${pkgdir}/opt/susurri/gui"
+    cp -r "${srcdir}/publish-gui/"* "${pkgdir}/opt/susurri/gui/"
+    chmod 755 "${pkgdir}/opt/susurri/gui/Susurri.GUI"
+
+    # Create CLI launcher
+    install -dm755 "${pkgdir}/usr/bin"
+    cat > "${pkgdir}/usr/bin/susurri" << 'EOF'
+#!/bin/bash
+exec /opt/susurri/susurri-cli "$@"
+EOF
+    chmod 755 "${pkgdir}/usr/bin/susurri"
+
+    # Create GUI launcher
+    cat > "${pkgdir}/usr/bin/susurri-gui" << 'EOF'
+#!/bin/bash
+# Susurri GUI Launcher - Avalonia Desktop Application
+exec /opt/susurri/gui/Susurri.GUI "$@"
+EOF
+    chmod 755 "${pkgdir}/usr/bin/susurri-gui"
+
+    # Create default config directory
+    install -dm755 "${pkgdir}/etc/susurri"
+    cat > "${pkgdir}/etc/susurri/appsettings.json" << 'EOF'
+{
+  "Messaging": { "UseBackgroundDispatcher": true },
+  "DHT": { "DefaultPort": 7070, "BootstrapNodes": [] },
+  "Logging": { "LogLevel": { "Default": "Warning", "Susurri": "Information" } }
+}
+EOF
+
+    # Install desktop entry for GUI
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/susurri.desktop" << EOF
+[Desktop Entry]
+Name=Susurri
+Comment=Secure P2P Chat with DHT and Onion Routing
+Exec=/usr/bin/susurri-gui
+Icon=susurri
+Terminal=false
+Type=Application
+Categories=Network;Chat;InstantMessaging;Security;
+Keywords=chat;p2p;secure;encrypted;privacy;
+StartupNotify=true
+StartupWMClass=Susurri.GUI
+EOF
+
+    # Install desktop entry for Terminal
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/susurri-terminal.desktop" << EOF
+[Desktop Entry]
+Name=Susurri (Terminal)
+Comment=Secure P2P Chat - Terminal Interface
+Exec=/usr/bin/susurri
+Icon=susurri
+Terminal=true
+Type=Application
+Categories=Network;Chat;InstantMessaging;Security;
+Keywords=chat;p2p;secure;encrypted;privacy;cli;
+StartupNotify=true
+EOF
+
+    # Install icon
+    install -dm755 "${pkgdir}/usr/share/icons/hicolor/scalable/apps"
+    cat > "${pkgdir}/usr/share/icons/hicolor/scalable/apps/susurri.svg" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366F1"/>
+      <stop offset="100%" style="stop-color:#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <path d="M128 48 C72 48 48 96 48 128 C48 160 72 192 128 192 L128 224 L160 192 C200 192 224 160 224 128 C224 96 200 48 128 48 Z" fill="white" opacity="0.9"/>
+  <circle cx="96" cy="128" r="16" fill="#6366F1"/>
+  <circle cx="144" cy="128" r="16" fill="#6366F1"/>
+  <circle cx="192" cy="128" r="16" fill="#6366F1"/>
+</svg>
+EOF
+}

@@ -1,0 +1,103 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Susurri.GUI.ViewModels"
+             x:Class="Susurri.GUI.Views.LoginView"
+             x:DataType="vm:LoginViewModel">
+
+    <Grid RowDefinitions="Auto,*,Auto" MaxWidth="400" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,32">
+            <TextBlock Text="Welcome Back"
+                       FontSize="28"
+                       FontWeight="Bold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Enter your credentials to continue"
+                       FontSize="14"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,8,0,0" />
+        </StackPanel>
+
+        <!-- Form -->
+        <StackPanel Grid.Row="1" Spacing="16">
+            <!-- Username -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="Username"
+                           FontSize="13"
+                           Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding Username}"
+                         Watermark="Enter username"
+                         Classes="modern" />
+            </StackPanel>
+
+            <!-- Passphrase -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="Passphrase (6+ words)"
+                           FontSize="13"
+                           Foreground="{StaticResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding Passphrase}"
+                         Watermark="Enter your BIP39 passphrase"
+                         PasswordChar="*"
+                         Classes="modern"
+                         AcceptsReturn="False" />
+            </StackPanel>
+
+            <!-- Generate Passphrase -->
+            <Button Content="Generate New Passphrase"
+                    Command="{Binding GeneratePassphraseCommand}"
+                    Classes="ghost"
+                    HorizontalAlignment="Left" />
+
+            <!-- Generated Passphrase Display -->
+            <Border IsVisible="{Binding HasGeneratedPassphrase}"
+                    Background="{StaticResource BackgroundTertiaryBrush}"
+                    CornerRadius="6"
+                    Padding="12">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Generated Passphrase (copy this!):"
+                               FontSize="12"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                    <TextBox Text="{Binding GeneratedPassphrase}"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas, monospace"
+                             FontSize="13"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Foreground="{StaticResource AccentBrush}" />
+                    <Button Content="Copy &amp; Use"
+                            Command="{Binding CopyAndUseCommand}"
+                            Classes="secondary"
+                            HorizontalAlignment="Left" />
+                </StackPanel>
+            </Border>
+
+            <!-- Cache Credentials -->
+            <CheckBox Content="Remember credentials locally"
+                      IsChecked="{Binding CacheCredentials}"
+                      Foreground="{StaticResource TextSecondaryBrush}" />
+
+            <!-- Status -->
+            <TextBlock Text="{Binding StatusMessage}"
+                       FontSize="13"
+                       Foreground="{StaticResource ErrorBrush}"
+                       IsVisible="{Binding HasError}"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Actions -->
+        <StackPanel Grid.Row="2" Spacing="12" Margin="0,32,0,0">
+            <Button Content="Login"
+                    Command="{Binding LoginCommand}"
+                    Classes="primary"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" />
+            <Button Content="Create Account"
+                    Command="{Binding SignupCommand}"
+                    Classes="secondary"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</UserControl>
