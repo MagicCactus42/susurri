@@ -50,18 +50,15 @@ public static class MessagePadding
         ArgumentNullException.ThrowIfNull(paddedData);
 
         if (paddedData.Length < LengthPrefixSize)
-            throw new ArgumentException("Padded data too short", nameof(paddedData));
+            throw new CryptographicException("Invalid padded data");
 
         // Read length prefix (big-endian)
         var length = (paddedData[0] << 24) | (paddedData[1] << 16) | (paddedData[2] << 8) | paddedData[3];
 
-        if (length < 0)
-            throw new ArgumentException("Invalid length prefix (negative)", nameof(paddedData));
-
-        if (length > paddedData.Length - LengthPrefixSize)
-            throw new ArgumentException(
-                $"Invalid length prefix: {length} exceeds available data {paddedData.Length - LengthPrefixSize}",
-                nameof(paddedData));
+        // Use a single generic exception message for all validation failures
+        // to prevent timing-based information leakage (padding oracle)
+        if (length < 0 || length > paddedData.Length - LengthPrefixSize)
+            throw new CryptographicException("Invalid padded data");
 
         var data = new byte[length];
         Buffer.BlockCopy(paddedData, LengthPrefixSize, data, 0, length);

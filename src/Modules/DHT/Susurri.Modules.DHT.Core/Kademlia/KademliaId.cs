@@ -119,9 +119,15 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
 
     public override int GetHashCode()
     {
-        // Use first 4 bytes for hash code
+        // XOR-fold all 32 bytes into 4 to get better hash distribution
+        // This prevents hash collision attacks against Dictionary/HashSet
         var bytes = _bytes ?? new byte[ByteLength];
-        return BitConverter.ToInt32(bytes, 0);
+        int hash = 0;
+        for (int i = 0; i < ByteLength; i += 4)
+        {
+            hash ^= BitConverter.ToInt32(bytes, i);
+        }
+        return hash;
     }
 
     public override string ToString()

@@ -63,13 +63,24 @@ public class NodeServer
     {
         try
         {
+            client.ReceiveTimeout = 5_000; // 5 second read timeout (anti-slowloris)
+            client.SendTimeout = 5_000;
+
             using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.UTF8);
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
 
-            var message = await reader.ReadLineAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var message = await reader.ReadLineAsync(cts.Token);
             if (string.IsNullOrWhiteSpace(message))
                 return;
+
+            // Limit input length to prevent abuse
+            if (message.Length > 1024)
+            {
+                _logger.LogWarning("Rejected oversized message ({Length} chars)", message.Length);
+                return;
+            }
 
             _logger.LogInformation("Received: {Message}", message);
 
@@ -82,13 +93,17 @@ public class NodeServer
 
             await writer.WriteLineAsync(response);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Client timed out");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error while handling client");
         }
         finally
         {
-            client.Close();
+            client.Dispose();
         }
     }
 

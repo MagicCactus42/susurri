@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Susurri.Modules.DHT.Core.Onion;
 
 namespace Susurri.Tests.Unit.Onion;
@@ -96,7 +97,7 @@ public class MessagePaddingTests
         // Truncate to less than length prefix
         var truncated = padded[..2];
 
-        Assert.Throws<ArgumentException>(() => MessagePadding.Unpad(truncated));
+        Assert.Throws<CryptographicException>(() => MessagePadding.Unpad(truncated));
     }
 
     [Fact]
@@ -111,7 +112,7 @@ public class MessagePaddingTests
         padded[2] = 0xFF;
         padded[3] = 0xFF;
 
-        Assert.Throws<ArgumentException>(() => MessagePadding.Unpad(padded));
+        Assert.Throws<CryptographicException>(() => MessagePadding.Unpad(padded));
     }
 
     [Fact]

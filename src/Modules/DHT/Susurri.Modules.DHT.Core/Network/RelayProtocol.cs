@@ -49,8 +49,25 @@ public enum RelayMessageType : byte
 /// </summary>
 public abstract class RelayMessage
 {
+    protected const int MaxPayloadSize = 256 * 1024; // 256 KB
+    protected const int MaxStringLength = 1024;
+
     public Guid MessageId { get; init; } = Guid.NewGuid();
     public abstract RelayMessageType Type { get; }
+
+    protected static void ValidateLength(int length, string fieldName)
+    {
+        if (length < 0 || length > MaxPayloadSize)
+            throw new InvalidDataException($"Invalid {fieldName} length: {length}");
+    }
+
+    protected static string ReadBoundedString(BinaryReader reader)
+    {
+        var s = reader.ReadString();
+        if (s.Length > MaxStringLength)
+            throw new InvalidDataException($"String too long: {s.Length}");
+        return s;
+    }
 
     public byte[] Serialize()
     {
@@ -160,8 +177,8 @@ public sealed class CircuitResponseMessage : RelayMessage
     {
         var circuitId = new Guid(reader.ReadBytes(16));
         var accepted = reader.ReadBoolean();
-        var rejectReason = reader.ReadString();
-        var targetEndpoint = reader.ReadString();
+        var rejectReason = ReadBoundedString(reader);
+        var targetEndpoint = ReadBoundedString(reader);
 
         return new CircuitResponseMessage
         {
@@ -195,6 +212,7 @@ public sealed class RelayDataMessage : RelayMessage
     {
         var circuitId = new Guid(reader.ReadBytes(16));
         var dataLen = reader.ReadInt32();
+        ValidateLength(dataLen, "relay data");
         var data = reader.ReadBytes(dataLen);
 
         return new RelayDataMessage
@@ -261,6 +279,7 @@ public sealed class RelayRequestMessage : RelayMessage
     {
         var targetNodeId = KademliaId.FromBytes(reader.ReadBytes(32));
         var payloadLen = reader.ReadInt32();
+        ValidateLength(payloadLen, "relay request payload");
         var payload = reader.ReadBytes(payloadLen);
         var expectResponse = reader.ReadBoolean();
 
@@ -315,8 +334,9 @@ public sealed class RelayResponseMessage : RelayMessage
         var inResponseTo = new Guid(reader.ReadBytes(16));
         var success = reader.ReadBoolean();
         var payloadLen = reader.ReadInt32();
+        ValidateLength(payloadLen, "relay response payload");
         var payload = reader.ReadBytes(payloadLen);
-        var error = reader.ReadString();
+        var error = ReadBoundedString(reader);
 
         return new RelayResponseMessage
         {

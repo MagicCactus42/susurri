@@ -27,12 +27,30 @@ public static class Program
 
         try
         {
-            await InitializeServicesAsync();
+            // Check for --bootstrap mode
+            var isBootstrapMode = args.Any(a =>
+                a.Equals("--bootstrap", StringComparison.OrdinalIgnoreCase) ||
+                a.Equals("-b", StringComparison.OrdinalIgnoreCase));
+
+            var bootstrapPort = 7070;
+            var portArgIndex = Array.FindIndex(args, a =>
+                a.Equals("--port", StringComparison.OrdinalIgnoreCase) ||
+                a.Equals("-p", StringComparison.OrdinalIgnoreCase));
+            if (portArgIndex >= 0 && portArgIndex + 1 < args.Length)
+            {
+                int.TryParse(args[portArgIndex + 1], out bootstrapPort);
+            }
+
+            await InitializeServicesAsync(isBootstrapMode);
             Console.WriteLine();
             PrintSuccess("Services initialized successfully.");
             Console.WriteLine();
 
-            if (args.Length > 0)
+            if (isBootstrapMode)
+            {
+                await RunBootstrapModeAsync(bootstrapPort);
+            }
+            else if (args.Length > 0 && !args[0].StartsWith("-"))
             {
                 await ExecuteCommandAsync(string.Join(" ", args));
             }
@@ -52,16 +70,62 @@ public static class Program
         }
     }
 
-    private static async Task InitializeServicesAsync()
+    private static async Task RunBootstrapModeAsync(int port)
     {
-        PrintInfo("Initializing Susurri...");
+        PrintInfo("Starting in BOOTSTRAP NODE mode...");
+        PrintInfo("This node will serve as a DHT bootstrap for the Susurri network.");
+        PrintInfo("No identity/login required. Node operates as DHT + relay only.");
+        Console.WriteLine();
+
+        await StartDhtNodeAsync(new[] { port.ToString() });
+
+        if (_dhtNode == null)
+        {
+            PrintError("Failed to start bootstrap node.");
+            return;
+        }
+
+        PrintSuccess($"Bootstrap node running on port {port}");
+        PrintInfo("Press Ctrl+C to stop.");
+        Console.WriteLine();
+
+        // Wait for shutdown signal
+        var shutdownCts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            shutdownCts.Cancel();
+            PrintInfo("Shutdown signal received...");
+        };
+
+        try
+        {
+            await Task.Delay(Timeout.Infinite, shutdownCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected
+        }
+
+        PrintInfo("Bootstrap node stopped.");
+    }
+
+    private static async Task InitializeServicesAsync(bool bootstrapMode = false)
+    {
+        PrintInfo(bootstrapMode ? "Initializing Susurri Bootstrap Node..." : "Initializing Susurri...");
 
         var services = new ServiceCollection();
 
-        var configuration = new ConfigurationBuilder()
+        var configBuilder = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: true)
-            .Build();
+            .AddJsonFile("appsettings.json", optional: true);
+
+        if (bootstrapMode)
+        {
+            configBuilder.AddJsonFile("appsettings.bootstrap.json", optional: true);
+        }
+
+        var configuration = configBuilder.Build();
 
         services.AddSingleton<IConfiguration>(configuration);
 
@@ -719,6 +783,15 @@ public static class Program
         Console.WriteLine("  version              - Show version info");
         Console.WriteLine("  help                 - Show this help");
         Console.WriteLine("  exit                 - Exit the application");
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("  Bootstrap Mode:");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.WriteLine("  --bootstrap, -b      - Start as headless bootstrap node (DHT + relay only)");
+        Console.WriteLine("  --port, -p <port>    - Set listening port (default: 7070)");
+        Console.WriteLine();
+        Console.WriteLine("  Example: susurri --bootstrap --port 7070");
     }
 
     private static void PrintDhtHelp()

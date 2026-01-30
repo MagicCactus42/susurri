@@ -15,6 +15,7 @@ public sealed class ChatService : IAsyncDisposable
     private readonly RelayService _relayService;
     private readonly ILogger<ChatService> _logger;
     private readonly Key _encryptionKey;
+    private readonly Key? _signingKey;
 
     // Cache of username -> public key mappings
     private readonly ConcurrentDictionary<string, UserPublicKeyRecord> _keyCache = new();
@@ -31,6 +32,7 @@ public sealed class ChatService : IAsyncDisposable
     public event Func<Guid, Task>? OnMessageAcknowledged;
 
     public byte[] LocalPublicKey => _dhtNode.EncryptionPublicKey;
+    public byte[] LocalSigningPublicKey => _dhtNode.SigningPublicKey;
     public string? LocalUsername { get; private set; }
     public bool IsConnected => _dhtNode.IsRunning;
     public int PeerCount => _dhtNode.KnownNodes;
@@ -42,11 +44,13 @@ public sealed class ChatService : IAsyncDisposable
         ILogger<KademliaDhtNode> dhtLogger,
         ILogger<OnionRouter> routerLogger,
         ILogger<RelayService> relayLogger,
-        ILogger<ConnectionManager> connectionLogger)
+        ILogger<ConnectionManager> connectionLogger,
+        Key? signingKey = null)
     {
         _encryptionKey = encryptionKey;
+        _signingKey = signingKey;
         _logger = chatLogger;
-        _dhtNode = new KademliaDhtNode(encryptionKey, dhtLogger);
+        _dhtNode = new KademliaDhtNode(encryptionKey, dhtLogger, signingKey);
         _router = new OnionRouter(encryptionKey, _dhtNode, routerLogger);
 
         var routingTable = GetRoutingTable();
@@ -59,8 +63,7 @@ public sealed class ChatService : IAsyncDisposable
 
     private RoutingTable GetRoutingTable()
     {
-        // TODO: expose routing table from KademliaDhtNode instead of creating new one
-        return new RoutingTable(_dhtNode.LocalId);
+        return _dhtNode.RoutingTable;
     }
 
     public async Task StartAsync(int port, string username, IEnumerable<string>? bootstrapNodes = null)
@@ -112,10 +115,18 @@ public sealed class ChatService : IAsyncDisposable
         var message = new ChatMessage
         {
             SenderPublicKey = LocalPublicKey,
+            SenderSigningPublicKey = LocalSigningPublicKey,
             Content = content,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             MessageId = Guid.NewGuid()
         };
+
+        // Sign the message if we have a signing key
+        if (_signingKey != null)
+        {
+            message.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
+                _signingKey, message.GetSignableData());
+        }
 
         _pendingMessages[message.MessageId] = new PendingMessage
         {
@@ -192,9 +203,16 @@ public sealed class ChatService : IAsyncDisposable
 
         _logger.LogInformation("Fetched {Count} offline messages", messages.Count);
 
-        // TODO: process offline messages through onion router
         foreach (var encryptedMessage in messages)
         {
+            try
+            {
+                await _router.ProcessOfflineMessageAsync(encryptedMessage);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to process offline message");
+            }
         }
     }
 
@@ -253,13 +271,44 @@ public sealed class ChatService : IAsyncDisposable
         if (!_receivedMessages.TryGetValue(originalMessageId, out var original))
             return new SendResult(false, null, "Original message not found");
 
-        // TODO: use reply path for anonymous replies
+        // If we know the sender by username, use normal message sending
         if (original.SenderUsername != null)
         {
             return await SendMessageAsync(original.SenderUsername, content);
         }
 
-        return new SendResult(false, null, "Cannot reply - sender unknown");
+        // Otherwise use the reply path for anonymous replies
+        if (original.ReplyPath.Tokens.Count == 0)
+        {
+            return new SendResult(false, null, "Cannot reply - no reply path available");
+        }
+
+        var message = new ChatMessage
+        {
+            SenderPublicKey = LocalPublicKey,
+            SenderSigningPublicKey = LocalSigningPublicKey,
+            Content = content,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            MessageId = Guid.NewGuid()
+        };
+
+        if (_signingKey != null)
+        {
+            message.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
+                _signingKey, message.GetSignableData());
+        }
+
+        try
+        {
+            await _router.SendReplyAsync(message, original.ReplyPath);
+            _logger.LogInformation("Reply {MessageId} sent via reply path", message.MessageId);
+            return new SendResult(true, message.MessageId, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send reply via reply path");
+            return new SendResult(false, message.MessageId, ex.Message);
+        }
     }
 
     private static System.Net.IPEndPoint? ParseEndpoint(string endpoint)
