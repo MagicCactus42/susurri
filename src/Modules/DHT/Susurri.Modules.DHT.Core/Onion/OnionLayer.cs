@@ -51,6 +51,7 @@ public sealed class OnionLayerContent
     public int NextHopPort { get; init; }
     public byte[] ReplyToken { get; init; } = Array.Empty<byte>();
     public byte[] InnerPayload { get; init; } = Array.Empty<byte>();
+    public byte[] RecipientPublicKey { get; init; } = Array.Empty<byte>();
 
     public byte[] Serialize()
     {
@@ -63,6 +64,12 @@ public sealed class OnionLayerContent
         {
             writer.Write(NextHopAddress ?? string.Empty);
             writer.Write((ushort)NextHopPort);
+        }
+
+        if (Type == OnionLayerType.FinalHop)
+        {
+            writer.Write((byte)RecipientPublicKey.Length);
+            writer.Write(RecipientPublicKey);
         }
 
         writer.Write(ReplyToken.Length);
@@ -82,11 +89,18 @@ public sealed class OnionLayerContent
 
         string? nextHopAddress = null;
         int nextHopPort = 0;
+        byte[] recipientPublicKey = Array.Empty<byte>();
 
         if (type == OnionLayerType.Relay)
         {
             nextHopAddress = reader.ReadString();
             nextHopPort = reader.ReadUInt16();
+        }
+
+        if (type == OnionLayerType.FinalHop)
+        {
+            var pubKeyLen = reader.ReadByte();
+            recipientPublicKey = reader.ReadBytes(pubKeyLen);
         }
 
         var replyTokenLen = reader.ReadInt32();
@@ -100,6 +114,7 @@ public sealed class OnionLayerContent
             Type = type,
             NextHopAddress = nextHopAddress,
             NextHopPort = nextHopPort,
+            RecipientPublicKey = recipientPublicKey,
             ReplyToken = replyToken,
             InnerPayload = innerPayload
         };

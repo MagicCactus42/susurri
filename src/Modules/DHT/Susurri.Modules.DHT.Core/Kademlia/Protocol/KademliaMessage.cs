@@ -5,7 +5,7 @@ public abstract class KademliaMessage
     private const int MaxValueSize = 32 * 1024;
     private const int MaxStringLength = 1024;
     private const int MaxNodesPerResponse = 20;
-    private const int PublicKeySize = 32;
+    protected const int PublicKeySize = 32;
 
     public Guid MessageId { get; init; } = Guid.NewGuid();
     public KademliaId SenderId { get; init; }
@@ -58,6 +58,9 @@ public abstract class KademliaMessage
             MessageType.Store => StoreMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             MessageType.StoreResponse => StoreResponseMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             MessageType.OnionMessage => OnionMessageWrapper.DeserializePayload(reader, messageId, senderId, senderPublicKey),
+            MessageType.StoreOfflineMessage => StoreOfflineMessageMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
+            MessageType.GetOfflineMessages => GetOfflineMessagesMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
+            MessageType.OfflineMessagesResponse => OfflineMessagesResponseMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             _ => throw new InvalidDataException($"Unknown message type: {type}")
         };
     }
@@ -303,6 +306,121 @@ public sealed class OnionMessageWrapper : KademliaMessage
 
         var payload = reader.ReadBytes(len);
         return new OnionMessageWrapper { MessageId = messageId, SenderId = senderId, SenderPublicKey = senderPublicKey, EncryptedPayload = payload };
+    }
+}
+
+public sealed class StoreOfflineMessageMessage : KademliaMessage
+{
+    private const int MaxPayloadSize = 64 * 1024;
+
+    public override MessageType Type => MessageType.StoreOfflineMessage;
+    public byte[] RecipientPublicKey { get; init; } = Array.Empty<byte>();
+    public byte[] EncryptedMessage { get; init; } = Array.Empty<byte>();
+
+    protected override void SerializePayload(BinaryWriter writer)
+    {
+        writer.Write((byte)RecipientPublicKey.Length);
+        writer.Write(RecipientPublicKey);
+        writer.Write(EncryptedMessage.Length);
+        writer.Write(EncryptedMessage);
+    }
+
+    public static StoreOfflineMessageMessage DeserializePayload(BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
+    {
+        var pubKeyLen = reader.ReadByte();
+        if (pubKeyLen > PublicKeySize)
+            throw new InvalidDataException($"Public key too large: {pubKeyLen}");
+        var recipientPublicKey = reader.ReadBytes(pubKeyLen);
+
+        var msgLen = reader.ReadInt32();
+        if (msgLen < 0 || msgLen > MaxPayloadSize)
+            throw new InvalidDataException($"Invalid message length: {msgLen}");
+        var encryptedMessage = reader.ReadBytes(msgLen);
+
+        return new StoreOfflineMessageMessage
+        {
+            MessageId = messageId,
+            SenderId = senderId,
+            SenderPublicKey = senderPublicKey,
+            RecipientPublicKey = recipientPublicKey,
+            EncryptedMessage = encryptedMessage
+        };
+    }
+}
+
+public sealed class GetOfflineMessagesMessage : KademliaMessage
+{
+    public override MessageType Type => MessageType.GetOfflineMessages;
+    public byte[] RecipientPublicKey { get; init; } = Array.Empty<byte>();
+
+    protected override void SerializePayload(BinaryWriter writer)
+    {
+        writer.Write((byte)RecipientPublicKey.Length);
+        writer.Write(RecipientPublicKey);
+    }
+
+    public static GetOfflineMessagesMessage DeserializePayload(BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
+    {
+        var pubKeyLen = reader.ReadByte();
+        if (pubKeyLen > PublicKeySize)
+            throw new InvalidDataException($"Public key too large: {pubKeyLen}");
+        var recipientPublicKey = reader.ReadBytes(pubKeyLen);
+
+        return new GetOfflineMessagesMessage
+        {
+            MessageId = messageId,
+            SenderId = senderId,
+            SenderPublicKey = senderPublicKey,
+            RecipientPublicKey = recipientPublicKey
+        };
+    }
+}
+
+public sealed class OfflineMessagesResponseMessage : KademliaMessage
+{
+    private const int MaxPayloadSize = 64 * 1024;
+    private const int MaxMessages = 100;
+
+    public override MessageType Type => MessageType.OfflineMessagesResponse;
+    public Guid InResponseTo { get; init; }
+    public List<byte[]> Messages { get; init; } = new();
+
+    protected override void SerializePayload(BinaryWriter writer)
+    {
+        writer.Write(InResponseTo.ToByteArray());
+        var count = Math.Min(Messages.Count, MaxMessages);
+        writer.Write((ushort)count);
+        for (int i = 0; i < count; i++)
+        {
+            writer.Write(Messages[i].Length);
+            writer.Write(Messages[i]);
+        }
+    }
+
+    public static OfflineMessagesResponseMessage DeserializePayload(BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
+    {
+        var inResponseTo = new Guid(reader.ReadBytes(16));
+        var count = reader.ReadUInt16();
+        if (count > MaxMessages)
+            throw new InvalidDataException($"Too many messages: {count}");
+
+        var messages = new List<byte[]>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var msgLen = reader.ReadInt32();
+            if (msgLen < 0 || msgLen > MaxPayloadSize)
+                throw new InvalidDataException($"Invalid message length: {msgLen}");
+            messages.Add(reader.ReadBytes(msgLen));
+        }
+
+        return new OfflineMessagesResponseMessage
+        {
+            MessageId = messageId,
+            SenderId = senderId,
+            SenderPublicKey = senderPublicKey,
+            InResponseTo = inResponseTo,
+            Messages = messages
+        };
     }
 }
 

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
 using Susurri.Modules.DHT.Core.Kademlia.Protocol;
 using Susurri.Modules.DHT.Core.Kademlia.Storage;
+using Susurri.Modules.DHT.Core.Network;
 
 namespace Susurri.Modules.DHT.Core.Kademlia;
 
@@ -14,6 +15,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     private readonly RoutingTable _routingTable;
     private readonly IDhtStorage _storage;
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<KademliaMessage>> _pendingRequests = new();
+    private readonly RateLimiter _rateLimiter = new(maxTokens: 50, refillRatePerSecond: 10.0);
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -21,22 +23,28 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
     private const int Alpha = 3; // Kademlia parallelism factor for iterative lookups
     private const int K = 20;
+    private const int MaxMessageSize = 256 * 1024; // 256 KB max message from network
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(60);
 
     public KademliaId LocalId { get; }
     public Key EncryptionKey { get; }
     public byte[] EncryptionPublicKey { get; }
+    public Key? SigningKey { get; }
+    public byte[] SigningPublicKey { get; }
     public IPEndPoint? LocalEndPoint { get; private set; }
     public bool IsRunning => _listener != null && _cts != null && !_cts.IsCancellationRequested;
     public int KnownNodes => _routingTable.TotalNodes;
+    public RoutingTable RoutingTable => _routingTable;
 
     public event Func<byte[], byte[], Task>? OnMessageReceived;
 
-    public KademliaDhtNode(Key encryptionKey, ILogger<KademliaDhtNode> logger)
+    public KademliaDhtNode(Key encryptionKey, ILogger<KademliaDhtNode> logger, Key? signingKey = null)
     {
         EncryptionKey = encryptionKey;
         EncryptionPublicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        SigningKey = signingKey;
+        SigningPublicKey = signingKey?.PublicKey.Export(KeyBlobFormat.RawPublicKey) ?? Array.Empty<byte>();
         LocalId = KademliaId.FromPublicKey(EncryptionPublicKey);
         _logger = logger;
         _routingTable = new RoutingTable(LocalId, K);
@@ -113,7 +121,20 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
         if (value != null)
         {
-            return UserPublicKeyRecord.Deserialize(value);
+            var record = UserPublicKeyRecord.Deserialize(value);
+
+            // Verify signature if present
+            if (record.SigningPublicKey.Length > 0 && record.Signature != null && record.Signature.Length > 0)
+            {
+                if (!record.VerifySignature())
+                {
+                    _logger.LogWarning("Public key record for {Username} has invalid signature, rejecting", username);
+                    return null;
+                }
+                _logger.LogDebug("Public key record for {Username} signature verified", username);
+            }
+
+            return record;
         }
 
         return null;
@@ -207,7 +228,14 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         {
             try
             {
-                // TODO: Send StoreOfflineMessage to node
+                var request = new StoreOfflineMessageMessage
+                {
+                    SenderId = LocalId,
+                    SenderPublicKey = EncryptionPublicKey,
+                    RecipientPublicKey = recipientPublicKey,
+                    EncryptedMessage = encryptedMessage
+                };
+                await SendRequestAsync<StoreResponseMessage>(node.EndPoint, request);
             }
             catch (Exception ex)
             {
@@ -227,7 +255,17 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         {
             try
             {
-                // TODO: Request offline messages from node
+                var request = new GetOfflineMessagesMessage
+                {
+                    SenderId = LocalId,
+                    SenderPublicKey = EncryptionPublicKey,
+                    RecipientPublicKey = EncryptionPublicKey
+                };
+                var response = await SendRequestAsync<OfflineMessagesResponseMessage>(node.EndPoint, request);
+                if (response != null)
+                {
+                    messages.AddRange(response.Messages);
+                }
             }
             catch (Exception ex)
             {
@@ -264,16 +302,31 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     {
         try
         {
+            var remoteEndpoint = (IPEndPoint)client.Client.RemoteEndPoint!;
+
+            // Rate limit per source IP
+            if (!_rateLimiter.IsAllowed(remoteEndpoint))
+            {
+                _logger.LogWarning("Rate limited connection from {Endpoint}", remoteEndpoint);
+                return;
+            }
+
+            client.ReceiveTimeout = 10_000; // 10 second read timeout
             using var stream = client.GetStream();
             using var reader = new BinaryReader(stream);
 
-            // Read message length
+            // Read message length with bounds validation
             var length = reader.ReadInt32();
+            if (length <= 0 || length > MaxMessageSize)
+            {
+                _logger.LogWarning("Rejected message with invalid size {Size} from {Endpoint}", length, remoteEndpoint);
+                return;
+            }
             var data = reader.ReadBytes(length);
 
             var message = KademliaMessage.Deserialize(data);
 
-            var senderEndpoint = (IPEndPoint)client.Client.RemoteEndPoint!;
+            var senderEndpoint = remoteEndpoint;
             var senderNode = new KademliaNode(message.SenderId, message.SenderPublicKey, senderEndpoint);
             _routingTable.TryAddNode(senderNode);
 
@@ -305,10 +358,13 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             FindNodeMessage findNode => HandleFindNode(findNode),
             FindValueMessage findValue => HandleFindValue(findValue),
             StoreMessage store => HandleStore(store),
+            StoreOfflineMessageMessage storeOffline => HandleStoreOfflineMessage(storeOffline),
+            GetOfflineMessagesMessage getOffline => HandleGetOfflineMessages(getOffline),
             PongMessage pong => HandleResponse(pong),
             FindNodeResponseMessage findNodeResp => HandleResponse(findNodeResp),
             FindValueResponseMessage findValueResp => HandleResponse(findValueResp),
             StoreResponseMessage storeResp => HandleResponse(storeResp),
+            OfflineMessagesResponseMessage offlineResp => HandleResponse(offlineResp),
             OnionMessageWrapper onion => await HandleOnionMessage(onion),
             _ => null
         };
@@ -391,6 +447,48 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         }
     }
 
+    private StoreResponseMessage HandleStoreOfflineMessage(StoreOfflineMessageMessage msg)
+    {
+        try
+        {
+            var key = KademliaId.FromPublicKey(msg.RecipientPublicKey);
+            _storage.StoreOfflineMessage(key, msg.EncryptedMessage);
+
+            return new StoreResponseMessage
+            {
+                SenderId = LocalId,
+                SenderPublicKey = EncryptionPublicKey,
+                InResponseTo = msg.MessageId,
+                Success = true
+            };
+        }
+        catch (Exception ex)
+        {
+            return new StoreResponseMessage
+            {
+                SenderId = LocalId,
+                SenderPublicKey = EncryptionPublicKey,
+                InResponseTo = msg.MessageId,
+                Success = false,
+                Error = ex.Message
+            };
+        }
+    }
+
+    private OfflineMessagesResponseMessage HandleGetOfflineMessages(GetOfflineMessagesMessage msg)
+    {
+        var key = KademliaId.FromPublicKey(msg.RecipientPublicKey);
+        var messages = _storage.GetOfflineMessages(key);
+
+        return new OfflineMessagesResponseMessage
+        {
+            SenderId = LocalId,
+            SenderPublicKey = EncryptionPublicKey,
+            InResponseTo = msg.MessageId,
+            Messages = messages.ToList()
+        };
+    }
+
     private KademliaMessage? HandleResponse(KademliaMessage response)
     {
         var responseToId = response switch
@@ -399,6 +497,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             FindNodeResponseMessage f => f.InResponseTo,
             FindValueResponseMessage f => f.InResponseTo,
             StoreResponseMessage s => s.InResponseTo,
+            OfflineMessagesResponseMessage o => o.InResponseTo,
             _ => Guid.Empty
         };
 
@@ -583,9 +682,17 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         var record = new UserPublicKeyRecord
         {
             EncryptionPublicKey = EncryptionPublicKey,
-            SigningPublicKey = Array.Empty<byte>(), // TODO: Add signing key
+            SigningPublicKey = SigningPublicKey,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
+
+        // Sign the record if we have a signing key
+        if (SigningKey != null)
+        {
+            var dataToSign = record.GetSignableData();
+            var signature = SignatureAlgorithm.Ed25519.Sign(SigningKey, dataToSign);
+            record = record with { Signature = signature };
+        }
 
         return record.Serialize();
     }
@@ -594,15 +701,56 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     {
         await StopAsync();
         EncryptionKey.Dispose();
+        SigningKey?.Dispose();
     }
 }
 
-public sealed class UserPublicKeyRecord
+public sealed record UserPublicKeyRecord
 {
     public byte[] EncryptionPublicKey { get; init; } = Array.Empty<byte>();
     public byte[] SigningPublicKey { get; init; } = Array.Empty<byte>();
     public long Timestamp { get; init; }
     public byte[]? Signature { get; init; }
+
+    /// <summary>
+    /// Returns the data that should be signed (everything except the signature itself).
+    /// </summary>
+    public byte[] GetSignableData()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write((byte)EncryptionPublicKey.Length);
+        writer.Write(EncryptionPublicKey);
+        writer.Write((byte)SigningPublicKey.Length);
+        writer.Write(SigningPublicKey);
+        writer.Write(Timestamp);
+
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Verifies the Ed25519 signature on this record.
+    /// </summary>
+    public bool VerifySignature()
+    {
+        if (SigningPublicKey.Length == 0 || Signature == null || Signature.Length == 0)
+            return false;
+
+        try
+        {
+            var signingPubKey = PublicKey.Import(
+                SignatureAlgorithm.Ed25519,
+                SigningPublicKey,
+                KeyBlobFormat.RawPublicKey);
+
+            return SignatureAlgorithm.Ed25519.Verify(signingPubKey, GetSignableData(), Signature);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public byte[] Serialize()
     {

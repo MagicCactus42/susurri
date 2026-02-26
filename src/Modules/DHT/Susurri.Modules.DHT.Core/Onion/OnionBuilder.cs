@@ -43,6 +43,7 @@ public sealed class OnionBuilder
                 content = new OnionLayerContent
                 {
                     Type = OnionLayerType.FinalHop,
+                    RecipientPublicKey = recipientPublicKey,
                     ReplyToken = replyTokens[i].EncryptedToken,
                     InnerPayload = currentPayload
                 };
@@ -93,30 +94,36 @@ public sealed class OnionBuilder
     {
         var tokens = new List<ReplyToken>();
 
+        // Generate a cryptographic nonce that identifies "this is the sender's token"
+        // instead of using plaintext "SENDER"
+        var senderMarkerNonce = new byte[32];
+        RandomNumberGenerator.Fill(senderMarkerNonce);
+
         for (int i = 0; i < path.Count; i++)
         {
             var node = path[i];
-            string prevAddress;
-            int prevPort;
 
+            ReplyTokenContent tokenContent;
             if (i == 0)
             {
-                prevAddress = "SENDER";
-                prevPort = 0;
+                tokenContent = new ReplyTokenContent
+                {
+                    PreviousHopAddress = string.Empty,
+                    PreviousHopPort = 0,
+                    SessionKey = GenerateSessionKey(),
+                    SenderMarker = senderMarkerNonce
+                };
             }
             else
             {
                 var prevNode = path[i - 1];
-                prevAddress = prevNode.EndPoint.Address.ToString();
-                prevPort = prevNode.EndPoint.Port;
+                tokenContent = new ReplyTokenContent
+                {
+                    PreviousHopAddress = prevNode.EndPoint.Address.ToString(),
+                    PreviousHopPort = prevNode.EndPoint.Port,
+                    SessionKey = GenerateSessionKey()
+                };
             }
-
-            var tokenContent = new ReplyTokenContent
-            {
-                PreviousHopAddress = prevAddress,
-                PreviousHopPort = prevPort,
-                SessionKey = GenerateSessionKey()
-            };
 
             var encryptedToken = EncryptLayer(tokenContent.Serialize(), node.EncryptionPublicKey);
 
@@ -124,7 +131,8 @@ public sealed class OnionBuilder
             {
                 NodePublicKey = node.EncryptionPublicKey,
                 EncryptedToken = encryptedToken,
-                SessionKey = tokenContent.SessionKey
+                SessionKey = tokenContent.SessionKey,
+                SenderMarkerNonce = i == 0 ? senderMarkerNonce : null
             });
         }
 
@@ -185,6 +193,11 @@ public sealed class ReplyToken
     public byte[] NodePublicKey { get; init; } = Array.Empty<byte>();
     public byte[] EncryptedToken { get; init; } = Array.Empty<byte>();
     public byte[] SessionKey { get; init; } = Array.Empty<byte>();
+    /// <summary>
+    /// Only set for the first token (sender's relay). The sender keeps this
+    /// to recognize their own ACK token upon receipt.
+    /// </summary>
+    public byte[]? SenderMarkerNonce { get; init; }
 }
 
 public sealed class ReplyTokenContent
@@ -192,6 +205,14 @@ public sealed class ReplyTokenContent
     public string PreviousHopAddress { get; init; } = string.Empty;
     public int PreviousHopPort { get; init; }
     public byte[] SessionKey { get; init; } = Array.Empty<byte>();
+    /// <summary>
+    /// A cryptographic nonce that identifies the sender's own token.
+    /// Non-empty only for the first hop (the sender's direct relay).
+    /// Replaces the old plaintext "SENDER" sentinel.
+    /// </summary>
+    public byte[] SenderMarker { get; init; } = Array.Empty<byte>();
+
+    public bool IsSenderToken => SenderMarker.Length > 0 && string.IsNullOrEmpty(PreviousHopAddress);
 
     public byte[] Serialize()
     {
@@ -202,6 +223,8 @@ public sealed class ReplyTokenContent
         writer.Write((ushort)PreviousHopPort);
         writer.Write((byte)SessionKey.Length);
         writer.Write(SessionKey);
+        writer.Write((byte)SenderMarker.Length);
+        writer.Write(SenderMarker);
 
         return ms.ToArray();
     }
@@ -215,12 +238,19 @@ public sealed class ReplyTokenContent
         var prevPort = reader.ReadUInt16();
         var keyLen = reader.ReadByte();
         var sessionKey = reader.ReadBytes(keyLen);
+        byte[] senderMarker = Array.Empty<byte>();
+        if (ms.Position < ms.Length)
+        {
+            var markerLen = reader.ReadByte();
+            senderMarker = reader.ReadBytes(markerLen);
+        }
 
         return new ReplyTokenContent
         {
             PreviousHopAddress = prevAddress,
             PreviousHopPort = prevPort,
-            SessionKey = sessionKey
+            SessionKey = sessionKey,
+            SenderMarker = senderMarker
         };
     }
 }
@@ -242,12 +272,16 @@ public sealed class RecipientPayload
         return ms.ToArray();
     }
 
+    private const int MaxPayloadSize = 256 * 1024; // 256 KB
+
     public static RecipientPayload Deserialize(byte[] data)
     {
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);
 
         var msgLen = reader.ReadInt32();
+        if (msgLen < 0 || msgLen > MaxPayloadSize)
+            throw new InvalidDataException($"Invalid recipient payload size: {msgLen}");
         var message = reader.ReadBytes(msgLen);
 
         var remaining = (int)(ms.Length - ms.Position);
@@ -284,6 +318,9 @@ public sealed class ReplyPath
         return ms.ToArray();
     }
 
+    private const int MaxTokens = 20;
+    private const int MaxTokenSize = 64 * 1024; // 64 KB per token
+
     public static ReplyPath Deserialize(byte[] data)
     {
         using var ms = new MemoryStream(data);
@@ -293,10 +330,15 @@ public sealed class ReplyPath
         var senderPublicKey = reader.ReadBytes(pubKeyLen);
 
         var tokenCount = reader.ReadByte();
-        var tokens = new List<byte[]>();
+        if (tokenCount > MaxTokens)
+            throw new InvalidDataException($"Too many reply tokens: {tokenCount}");
+
+        var tokens = new List<byte[]>(tokenCount);
         for (int i = 0; i < tokenCount; i++)
         {
             var tokenLen = reader.ReadInt32();
+            if (tokenLen < 0 || tokenLen > MaxTokenSize)
+                throw new InvalidDataException($"Invalid reply token size: {tokenLen}");
             tokens.Add(reader.ReadBytes(tokenLen));
         }
 
@@ -311,9 +353,30 @@ public sealed class ReplyPath
 public sealed class ChatMessage
 {
     public byte[] SenderPublicKey { get; init; } = Array.Empty<byte>();
+    public byte[] SenderSigningPublicKey { get; init; } = Array.Empty<byte>();
     public string Content { get; init; } = string.Empty;
     public long Timestamp { get; init; }
     public Guid MessageId { get; init; } = Guid.NewGuid();
+    public byte[] Signature { get; set; } = Array.Empty<byte>();
+
+    /// <summary>
+    /// Returns the signable portion of the message (everything except the signature itself).
+    /// </summary>
+    public byte[] GetSignableData()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write((byte)SenderPublicKey.Length);
+        writer.Write(SenderPublicKey);
+        writer.Write((byte)SenderSigningPublicKey.Length);
+        writer.Write(SenderSigningPublicKey);
+        writer.Write(Content);
+        writer.Write(Timestamp);
+        writer.Write(MessageId.ToByteArray());
+
+        return ms.ToArray();
+    }
 
     public byte[] Serialize()
     {
@@ -322,9 +385,13 @@ public sealed class ChatMessage
 
         writer.Write((byte)SenderPublicKey.Length);
         writer.Write(SenderPublicKey);
+        writer.Write((byte)SenderSigningPublicKey.Length);
+        writer.Write(SenderSigningPublicKey);
         writer.Write(Content);
         writer.Write(Timestamp);
         writer.Write(MessageId.ToByteArray());
+        writer.Write((ushort)Signature.Length);
+        writer.Write(Signature);
 
         return ms.ToArray();
     }
@@ -336,16 +403,48 @@ public sealed class ChatMessage
 
         var pubKeyLen = reader.ReadByte();
         var senderPublicKey = reader.ReadBytes(pubKeyLen);
+        var sigPubKeyLen = reader.ReadByte();
+        var senderSigningPublicKey = reader.ReadBytes(sigPubKeyLen);
         var content = reader.ReadString();
         var timestamp = reader.ReadInt64();
         var messageId = new Guid(reader.ReadBytes(16));
+        var sigLen = reader.ReadUInt16();
+        var signature = reader.ReadBytes(sigLen);
 
         return new ChatMessage
         {
             SenderPublicKey = senderPublicKey,
+            SenderSigningPublicKey = senderSigningPublicKey,
             Content = content,
             Timestamp = timestamp,
-            MessageId = messageId
+            MessageId = messageId,
+            Signature = signature
         };
+    }
+
+    /// <summary>
+    /// Verifies the Ed25519 signature on this message.
+    /// Returns true if signature is valid, false otherwise.
+    /// Returns true if no signing key is provided (backwards compat).
+    /// </summary>
+    public bool VerifySignature()
+    {
+        if (SenderSigningPublicKey.Length == 0 || Signature.Length == 0)
+            return true; // No signing key = unverifiable, allow for backward compat
+
+        try
+        {
+            var signingPubKey = NSec.Cryptography.PublicKey.Import(
+                NSec.Cryptography.SignatureAlgorithm.Ed25519,
+                SenderSigningPublicKey,
+                NSec.Cryptography.KeyBlobFormat.RawPublicKey);
+
+            return NSec.Cryptography.SignatureAlgorithm.Ed25519.Verify(
+                signingPubKey, GetSignableData(), Signature);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

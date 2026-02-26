@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
 using Susurri.Modules.DHT.Core.Kademlia;
+using Susurri.Modules.DHT.Core.Network;
 
 namespace Susurri.Modules.DHT.Core.Onion;
 
@@ -19,6 +20,7 @@ public sealed class OnionRouter
     private readonly Key _encryptionKey;
     private readonly KademliaDhtNode _dhtNode;
     private readonly ILogger<OnionRouter> _logger;
+    private readonly RateLimiter _rateLimiter = new(maxTokens: 30, refillRatePerSecond: 5.0);
 
     /// <summary>
     /// Event raised when a chat message is received for the local user.
@@ -43,6 +45,13 @@ public sealed class OnionRouter
     /// </summary>
     public async Task ProcessIncomingAsync(byte[] encryptedPayload, IPEndPoint senderEndpoint)
     {
+        // Rate limit per source IP
+        if (!_rateLimiter.IsAllowed(senderEndpoint))
+        {
+            _logger.LogWarning("Rate limited onion message from {Endpoint}", senderEndpoint);
+            return;
+        }
+
         try
         {
             // Parse the outer onion layer
@@ -87,6 +96,41 @@ public sealed class OnionRouter
     }
 
     /// <summary>
+    /// Processes an offline message that was stored for the local user.
+    /// The payload is the inner content from a FinalHop, still encrypted for us.
+    /// </summary>
+    public async Task ProcessOfflineMessageAsync(byte[] encryptedPayload)
+    {
+        try
+        {
+            // The offline message is the encrypted recipient layer (OnionLayer)
+            var layer = OnionLayer.Deserialize(encryptedPayload);
+            var decrypted = DecryptLayer(layer);
+            if (decrypted == null)
+            {
+                _logger.LogWarning("Failed to decrypt offline message");
+                return;
+            }
+
+            // Parse as recipient payload (same as Delivery path)
+            var payload = RecipientPayload.Deserialize(decrypted);
+            var unpaddedMessage = MessagePadding.Unpad(payload.Message);
+            var message = ChatMessage.Deserialize(unpaddedMessage);
+
+            _logger.LogInformation("Processed offline message {MessageId}", message.MessageId);
+
+            if (OnMessageReceived != null)
+            {
+                await OnMessageReceived(message, payload.ReplyPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error processing offline message");
+        }
+    }
+
+    /// <summary>
     /// Sends an onion-encrypted message.
     /// </summary>
     public async Task SendMessageAsync(ChatMessage message, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path)
@@ -111,38 +155,83 @@ public sealed class OnionRouter
             return;
         }
 
-        // Build ACK message
         var ackContent = new AckMessage
         {
             MessageId = messageId,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
 
-        // Encrypt the ACK and wrap it in onion layers using reply tokens
-        // Start from the last token (closest to recipient) and work back
-        var currentPayload = ackContent.Serialize();
+        await SendViaReplyPathAsync(ackContent.Serialize(), replyPath, OnionLayerType.Ack);
+        _logger.LogInformation("ACK sent for message {MessageId}", messageId);
+    }
 
+    /// <summary>
+    /// Sends a reply message back via the reply path.
+    /// </summary>
+    public async Task SendReplyAsync(ChatMessage message, ReplyPath replyPath)
+    {
+        if (replyPath.Tokens.Count == 0)
+        {
+            _logger.LogWarning("Cannot send reply - no reply tokens");
+            return;
+        }
+
+        var messageBytes = message.Serialize();
+        var paddedMessage = MessagePadding.Pad(messageBytes);
+
+        // Encrypt the message for the original sender using their public key from the reply path
+        if (replyPath.SenderPublicKey.Length > 0)
+        {
+            var recipientPayload = new RecipientPayload
+            {
+                Message = paddedMessage,
+                ReplyPath = new ReplyPath() // No reply path in a reply-to-reply
+            };
+            var encrypted = EncryptLayerForNode(recipientPayload.Serialize(), replyPath.SenderPublicKey);
+            var deliveryContent = new OnionLayerContent
+            {
+                Type = OnionLayerType.Delivery,
+                InnerPayload = encrypted
+            };
+            await SendViaReplyPathAsync(deliveryContent.Serialize(), replyPath, OnionLayerType.Relay);
+        }
+        else
+        {
+            await SendViaReplyPathAsync(paddedMessage, replyPath, OnionLayerType.Relay);
+        }
+
+        _logger.LogInformation("Reply sent for message {MessageId}", message.MessageId);
+    }
+
+    private async Task SendViaReplyPathAsync(byte[] payload, ReplyPath replyPath, OnionLayerType innerType)
+    {
+        var currentPayload = payload;
+
+        // Wrap in onion layers using reply tokens (last to first)
         for (int i = replyPath.Tokens.Count - 1; i >= 0; i--)
         {
             var token = replyPath.Tokens[i];
-
-            // Each token is already encrypted for that node
-            // The node will decrypt it, extract the previous hop, and forward the inner payload
             var layerContent = new OnionLayerContent
             {
                 Type = OnionLayerType.Ack,
                 ReplyToken = token,
                 InnerPayload = currentPayload
             };
-
-            // Note: In a real implementation, we'd encrypt this with the session key
-            // from the token. For now, we'll use a simpler approach.
             currentPayload = layerContent.Serialize();
         }
 
-        // For now, we'll need to somehow get the address of the first node in the reply path
-        // This is a simplification - in production, the first token would contain this info
-        _logger.LogInformation("ACK prepared for message {MessageId}", messageId);
+        // The first reply token is for the last hop in the original path.
+        // We need to find a node to send to. The last token's node is the closest
+        // to us in the path. We send to it via the DHT routing table.
+        var lastHopNodes = _dhtNode.GetRandomNodesForPath(1);
+        if (lastHopNodes.Count > 0)
+        {
+            await SendToNodeAsync(lastHopNodes[0].EndPoint, currentPayload);
+        }
+        else
+        {
+            _logger.LogWarning("No nodes available to send reply");
+        }
     }
 
     private async Task HandleRelayAsync(OnionLayerContent content, IPEndPoint senderEndpoint)
@@ -153,39 +242,116 @@ public sealed class OnionRouter
             return;
         }
 
-        var nextEndpoint = new IPEndPoint(IPAddress.Parse(content.NextHopAddress), content.NextHopPort);
+        if (!IPAddress.TryParse(content.NextHopAddress, out var nextAddress))
+        {
+            _logger.LogWarning("Relay layer has invalid next hop address");
+            return;
+        }
+
+        if (content.NextHopPort <= 0 || content.NextHopPort > 65535)
+        {
+            _logger.LogWarning("Relay layer has invalid next hop port: {Port}", content.NextHopPort);
+            return;
+        }
+
+        // Block loopback and link-local to prevent SSRF-style relay abuse
+        if (IPAddress.IsLoopback(nextAddress) || nextAddress.IsIPv6LinkLocal)
+        {
+            _logger.LogWarning("Blocked relay to loopback/link-local address {Address}", nextAddress);
+            return;
+        }
+
+        var nextEndpoint = new IPEndPoint(nextAddress, content.NextHopPort);
 
         _logger.LogDebug("Relaying onion to {NextHop}", nextEndpoint);
 
-        // Store the reply token for the return path
-        // (In a full implementation, we'd store this with the session for routing ACKs back)
+        // Random delay (50-500ms) to prevent timing correlation attacks
+        var delayMs = Random.Shared.Next(50, 501);
+        await Task.Delay(delayMs);
 
         await SendToNodeAsync(nextEndpoint, content.InnerPayload);
     }
 
     private async Task HandleFinalHopAsync(OnionLayerContent content, IPEndPoint senderEndpoint)
     {
-        // This is the last relay node - need to look up recipient in DHT
-        // The inner payload is encrypted for the recipient
-
-        // Parse the inner layer to get recipient info
-        // For now, we assume the recipient is connected to us or we store it
-
         _logger.LogDebug("Final hop - attempting to deliver message");
 
-        // Try to find the recipient's current node via DHT
-        // For now, store as offline message
-        // The inner payload is still encrypted for the recipient
+        var recipientPublicKey = content.RecipientPublicKey;
+        if (recipientPublicKey.Length == 0)
+        {
+            _logger.LogWarning("Final hop layer missing recipient public key");
+            return;
+        }
 
-        // In a real implementation:
-        // 1. Extract recipient's public key from somewhere (maybe message metadata)
-        // 2. Look up their current node in DHT
-        // 3. Forward to that node, or store offline
+        // Check if the recipient is the local node
+        if (recipientPublicKey.SequenceEqual(_encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey)))
+        {
+            // We are the recipient — treat as a Delivery
+            var deliveryContent = new OnionLayerContent
+            {
+                Type = OnionLayerType.Delivery,
+                InnerPayload = content.InnerPayload
+            };
+            await HandleDeliveryAsync(deliveryContent);
+            return;
+        }
 
-        // Simplified: just store it
-        // We'd need recipient info to store properly - this is a TODO
+        // Look up recipient's current node in DHT
+        var recipientId = Kademlia.KademliaId.FromPublicKey(recipientPublicKey);
+        var closestNodes = _dhtNode.RoutingTable.FindClosestNodes(recipientId, 1);
+        var recipientNode = closestNodes.FirstOrDefault(n => n.EncryptionPublicKey.SequenceEqual(recipientPublicKey));
 
-        _logger.LogInformation("Message queued for delivery (final hop)");
+        if (recipientNode != null)
+        {
+            // Recipient is known in the routing table — wrap as Delivery and forward
+            var deliveryContent = new OnionLayerContent
+            {
+                Type = OnionLayerType.Delivery,
+                InnerPayload = content.InnerPayload
+            };
+            var deliveryPayload = EncryptLayerForNode(deliveryContent.Serialize(), recipientPublicKey);
+            await SendToNodeAsync(recipientNode.EndPoint, deliveryPayload);
+            _logger.LogInformation("Message forwarded to recipient node");
+        }
+        else
+        {
+            // Recipient not found — store as offline message
+            await _dhtNode.StoreOfflineMessageAsync(recipientPublicKey, content.InnerPayload);
+            _logger.LogInformation("Recipient offline, message stored for later delivery");
+        }
+    }
+
+    private byte[] EncryptLayerForNode(byte[] plaintext, byte[] recipientPublicKey)
+    {
+        using var ephemeralKey = Key.Create(KeyExchange);
+        var ephemeralPubKeyBytes = ephemeralKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+
+        var recipientPubKey = PublicKey.Import(KeyExchange, recipientPublicKey, KeyBlobFormat.RawPublicKey);
+
+        using var sharedSecret = KeyExchange.Agree(ephemeralKey, recipientPubKey);
+        if (sharedSecret == null)
+            throw new System.Security.Cryptography.CryptographicException("Key agreement failed");
+
+        using var symmetricKey = KeyDerivation.DeriveKey(
+            sharedSecret,
+            ReadOnlySpan<byte>.Empty,
+            ReadOnlySpan<byte>.Empty,
+            Aead,
+            new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+
+        var nonce = new byte[Aead.NonceSize];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonce);
+
+        var ciphertext = Aead.Encrypt(symmetricKey, nonce, null, plaintext);
+
+        var layer = new OnionLayer
+        {
+            EphemeralPublicKey = ephemeralPubKeyBytes,
+            Nonce = nonce,
+            Ciphertext = ciphertext
+        };
+
+        return layer.Serialize();
     }
 
     private async Task HandleDeliveryAsync(OnionLayerContent content)
@@ -197,6 +363,18 @@ public sealed class OnionRouter
             var payload = RecipientPayload.Deserialize(content.InnerPayload);
             var unpaddedMessage = MessagePadding.Unpad(payload.Message);
             var message = ChatMessage.Deserialize(unpaddedMessage);
+
+            // Verify signature if present
+            if (message.SenderSigningPublicKey.Length > 0 && message.Signature.Length > 0)
+            {
+                if (!message.VerifySignature())
+                {
+                    _logger.LogWarning("Message {MessageId} has invalid signature, rejecting",
+                        message.MessageId);
+                    return;
+                }
+                _logger.LogDebug("Message {MessageId} signature verified", message.MessageId);
+            }
 
             _logger.LogInformation("Received message {MessageId} from {Sender}",
                 message.MessageId, Convert.ToHexString(message.SenderPublicKey)[..16]);
@@ -230,9 +408,9 @@ public sealed class OnionRouter
 
         var tokenContent = ReplyTokenContent.Deserialize(tokenData);
 
-        if (tokenContent.PreviousHopAddress == "SENDER")
+        if (tokenContent.IsSenderToken)
         {
-            // This ACK is for us (the original sender)
+            // This ACK is for us (the original sender) — identified by crypto marker
             var ack = AckMessage.Deserialize(content.InnerPayload);
             _logger.LogInformation("Received ACK for message {MessageId}", ack.MessageId);
 
@@ -241,7 +419,7 @@ public sealed class OnionRouter
                 await OnAckReceived(ack.MessageId);
             }
         }
-        else
+        else if (!string.IsNullOrEmpty(tokenContent.PreviousHopAddress))
         {
             // Forward the ACK to the previous hop
             var prevEndpoint = new IPEndPoint(
@@ -249,6 +427,10 @@ public sealed class OnionRouter
                 tokenContent.PreviousHopPort);
 
             await SendToNodeAsync(prevEndpoint, content.InnerPayload);
+        }
+        else
+        {
+            _logger.LogWarning("Reply token has no previous hop and no sender marker");
         }
     }
 

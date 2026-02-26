@@ -10,10 +10,24 @@ public sealed class DhtStorage : IDhtStorage
     private DateTimeOffset _lastCleanup = DateTimeOffset.UtcNow;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(5);
 
+    // Global storage limits to prevent DoS via unbounded growth
+    private const int MaxStoredValues = 10_000;
+    private const int MaxOfflineRecipients = 5_000;
+    private const long MaxTotalStorageBytes = 256 * 1024 * 1024; // 256 MB
+    private long _estimatedTotalBytes;
+
     public void Store(KademliaId key, byte[] value, TimeSpan? ttl = null)
     {
+        if (_store.Count >= MaxStoredValues || Interlocked.Read(ref _estimatedTotalBytes) >= MaxTotalStorageBytes)
+        {
+            TryCleanup();
+            if (_store.Count >= MaxStoredValues)
+                return; // Silently drop — storage full
+        }
+
         var expiry = ttl.HasValue ? DateTimeOffset.UtcNow.Add(ttl.Value) : (DateTimeOffset?)null;
         _store[key] = new StoredValue(value, expiry);
+        Interlocked.Add(ref _estimatedTotalBytes, value.Length);
         TryCleanup();
     }
 
@@ -56,6 +70,15 @@ public sealed class DhtStorage : IDhtStorage
 
     public void StoreOfflineMessage(KademliaId recipientKeyHash, byte[] encryptedMessage, TimeSpan? ttl = null)
     {
+        // Global limits
+        if (_offlineMessages.Count >= MaxOfflineRecipients
+            || Interlocked.Read(ref _estimatedTotalBytes) >= MaxTotalStorageBytes)
+        {
+            TryCleanup();
+            if (_offlineMessages.Count >= MaxOfflineRecipients)
+                return; // Storage full — silently drop
+        }
+
         var expiry = ttl.HasValue ? DateTimeOffset.UtcNow.Add(ttl.Value) : DateTimeOffset.UtcNow.AddDays(7);
         var message = new OfflineMessage(encryptedMessage, DateTimeOffset.UtcNow, expiry);
 
@@ -74,6 +97,7 @@ public sealed class DhtStorage : IDhtStorage
                 return list;
             });
 
+        Interlocked.Add(ref _estimatedTotalBytes, encryptedMessage.Length);
         TryCleanup();
     }
 
