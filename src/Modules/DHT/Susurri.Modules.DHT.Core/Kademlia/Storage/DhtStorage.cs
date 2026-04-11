@@ -10,7 +10,6 @@ public sealed class DhtStorage : IDhtStorage
     private DateTimeOffset _lastCleanup = DateTimeOffset.UtcNow;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(5);
 
-    // Global storage limits to prevent DoS via unbounded growth
     private const int MaxStoredValues = 10_000;
     private const int MaxOfflineRecipients = 5_000;
     private const long MaxTotalStorageBytes = 256 * 1024 * 1024; // 256 MB
@@ -22,7 +21,7 @@ public sealed class DhtStorage : IDhtStorage
         {
             TryCleanup();
             if (_store.Count >= MaxStoredValues)
-                return; // Silently drop — storage full
+                return;
         }
 
         var expiry = ttl.HasValue ? DateTimeOffset.UtcNow.Add(ttl.Value) : (DateTimeOffset?)null;
@@ -70,13 +69,12 @@ public sealed class DhtStorage : IDhtStorage
 
     public void StoreOfflineMessage(KademliaId recipientKeyHash, byte[] encryptedMessage, TimeSpan? ttl = null)
     {
-        // Global limits
         if (_offlineMessages.Count >= MaxOfflineRecipients
             || Interlocked.Read(ref _estimatedTotalBytes) >= MaxTotalStorageBytes)
         {
             TryCleanup();
             if (_offlineMessages.Count >= MaxOfflineRecipients)
-                return; // Storage full — silently drop
+                return;
         }
 
         var expiry = ttl.HasValue ? DateTimeOffset.UtcNow.Add(ttl.Value) : DateTimeOffset.UtcNow.AddDays(7);

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using NSec.Cryptography;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.IAM.Core.Crypto;
 
@@ -109,7 +110,7 @@ public sealed class OnionCrypto : IOnionCrypto
         return keyDerivation.DeriveKey(
             sharedSecret,
             ReadOnlySpan<byte>.Empty,
-            ReadOnlySpan<byte>.Empty,
+            HkdfContexts.DirectMessage,
             Aead,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
     }

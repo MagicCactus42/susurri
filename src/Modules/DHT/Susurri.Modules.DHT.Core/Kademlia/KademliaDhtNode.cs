@@ -94,7 +94,6 @@ public sealed class KademliaDhtNode : IAsyncDisposable
                     _routingTable.TryAddNode(node);
                     _logger.LogInformation("Connected to bootstrap node {NodeId}", pong.SenderId.ToString()[..16]);
 
-                    // Kademlia bootstrap: lookup our own ID to populate routing table
                     await FindNodeAsync(LocalId);
                 }
             }
@@ -123,7 +122,6 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         {
             var record = UserPublicKeyRecord.Deserialize(value);
 
-            // Verify signature if present
             if (record.SigningPublicKey.Length > 0 && record.Signature != null && record.Signature.Length > 0)
             {
                 if (!record.VerifySignature())
@@ -167,7 +165,6 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         if (localValue != null)
             return localValue;
 
-        // Kademlia iterative lookup
         var queried = new HashSet<KademliaId> { LocalId };
         var shortlist = new List<KademliaNode>(_routingTable.FindClosestNodes(key, K));
 
@@ -250,17 +247,18 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         var messages = new List<byte[]>();
         messages.AddRange(_storage.GetOfflineMessages(key));
 
+        if (SigningKey == null)
+        {
+            _logger.LogWarning("Cannot fetch remote offline messages: no signing key available for authentication");
+            return messages;
+        }
+
         var closestNodes = await FindClosestNodesAsync(key);
         foreach (var node in closestNodes.Take(K / 2))
         {
             try
             {
-                var request = new GetOfflineMessagesMessage
-                {
-                    SenderId = LocalId,
-                    SenderPublicKey = EncryptionPublicKey,
-                    RecipientPublicKey = EncryptionPublicKey
-                };
+                var request = CreateSignedGetOfflineMessagesRequest();
                 var response = await SendRequestAsync<OfflineMessagesResponseMessage>(node.EndPoint, request);
                 if (response != null)
                 {
@@ -274,6 +272,32 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         }
 
         return messages;
+    }
+
+    private GetOfflineMessagesMessage CreateSignedGetOfflineMessagesRequest()
+    {
+        var request = new GetOfflineMessagesMessage
+        {
+            SenderId = LocalId,
+            SenderPublicKey = EncryptionPublicKey,
+            RecipientPublicKey = EncryptionPublicKey,
+            SigningPublicKey = SigningPublicKey,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+
+        var signableData = request.GetSignableData();
+        var signature = SignatureAlgorithm.Ed25519.Sign(SigningKey!, signableData);
+
+        return new GetOfflineMessagesMessage
+        {
+            MessageId = request.MessageId,
+            SenderId = request.SenderId,
+            SenderPublicKey = request.SenderPublicKey,
+            RecipientPublicKey = request.RecipientPublicKey,
+            SigningPublicKey = request.SigningPublicKey,
+            Timestamp = request.Timestamp,
+            Signature = signature
+        };
     }
 
     public IReadOnlyList<KademliaNode> GetRandomNodesForPath(int count)
@@ -304,18 +328,16 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         {
             var remoteEndpoint = (IPEndPoint)client.Client.RemoteEndPoint!;
 
-            // Rate limit per source IP
             if (!_rateLimiter.IsAllowed(remoteEndpoint))
             {
                 _logger.LogWarning("Rate limited connection from {Endpoint}", remoteEndpoint);
                 return;
             }
 
-            client.ReceiveTimeout = 10_000; // 10 second read timeout
+            client.ReceiveTimeout = 10_000;
             using var stream = client.GetStream();
             using var reader = new BinaryReader(stream);
 
-            // Read message length with bounds validation
             var length = reader.ReadInt32();
             if (length <= 0 || length > MaxMessageSize)
             {
@@ -475,8 +497,24 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         }
     }
 
+    private static readonly TimeSpan OfflineMessageTimestampWindow = TimeSpan.FromMinutes(5);
+
     private OfflineMessagesResponseMessage HandleGetOfflineMessages(GetOfflineMessagesMessage msg)
     {
+        if (!VerifyOfflineMessageAuth(msg))
+        {
+            _logger.LogWarning("Rejected unauthenticated or invalid GetOfflineMessages request from {SenderId}",
+                msg.SenderId.ToString()[..16]);
+
+            return new OfflineMessagesResponseMessage
+            {
+                SenderId = LocalId,
+                SenderPublicKey = EncryptionPublicKey,
+                InResponseTo = msg.MessageId,
+                Messages = new List<byte[]>()
+            };
+        }
+
         var key = KademliaId.FromPublicKey(msg.RecipientPublicKey);
         var messages = _storage.GetOfflineMessages(key);
 
@@ -487,6 +525,36 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             InResponseTo = msg.MessageId,
             Messages = messages.ToList()
         };
+    }
+
+    private bool VerifyOfflineMessageAuth(GetOfflineMessagesMessage msg)
+    {
+        if (msg.SigningPublicKey.Length == 0 || msg.Signature.Length == 0)
+            return false;
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var delta = Math.Abs(now - msg.Timestamp);
+        if (delta > (long)OfflineMessageTimestampWindow.TotalSeconds)
+        {
+            _logger.LogWarning("GetOfflineMessages request has stale timestamp (delta={Delta}s)", delta);
+            return false;
+        }
+
+        try
+        {
+            var signingPubKey = PublicKey.Import(
+                SignatureAlgorithm.Ed25519,
+                msg.SigningPublicKey,
+                KeyBlobFormat.RawPublicKey);
+
+            return SignatureAlgorithm.Ed25519.Verify(
+                signingPubKey, msg.GetSignableData(), msg.Signature);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to verify GetOfflineMessages signature");
+            return false;
+        }
     }
 
     private KademliaMessage? HandleResponse(KademliaMessage response)
@@ -686,7 +754,6 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
 
-        // Sign the record if we have a signing key
         if (SigningKey != null)
         {
             var dataToSign = record.GetSignableData();
@@ -712,9 +779,6 @@ public sealed record UserPublicKeyRecord
     public long Timestamp { get; init; }
     public byte[]? Signature { get; init; }
 
-    /// <summary>
-    /// Returns the data that should be signed (everything except the signature itself).
-    /// </summary>
     public byte[] GetSignableData()
     {
         using var ms = new MemoryStream();
@@ -729,9 +793,6 @@ public sealed record UserPublicKeyRecord
         return ms.ToArray();
     }
 
-    /// <summary>
-    /// Verifies the Ed25519 signature on this record.
-    /// </summary>
     public bool VerifySignature()
     {
         if (SigningPublicKey.Length == 0 || Signature == null || Signature.Length == 0)

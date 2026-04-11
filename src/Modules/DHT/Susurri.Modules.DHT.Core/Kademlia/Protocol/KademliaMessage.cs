@@ -350,13 +350,38 @@ public sealed class StoreOfflineMessageMessage : KademliaMessage
 
 public sealed class GetOfflineMessagesMessage : KademliaMessage
 {
+    private const int MaxSignatureSize = 64;
+
     public override MessageType Type => MessageType.GetOfflineMessages;
     public byte[] RecipientPublicKey { get; init; } = Array.Empty<byte>();
+
+    public byte[] SigningPublicKey { get; init; } = Array.Empty<byte>();
+
+    public long Timestamp { get; init; }
+
+    public byte[] Signature { get; init; } = Array.Empty<byte>();
+
+    public byte[] GetSignableData()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write(RecipientPublicKey);
+        writer.Write(Timestamp);
+        writer.Write(MessageId.ToByteArray());
+
+        return ms.ToArray();
+    }
 
     protected override void SerializePayload(BinaryWriter writer)
     {
         writer.Write((byte)RecipientPublicKey.Length);
         writer.Write(RecipientPublicKey);
+        writer.Write((byte)SigningPublicKey.Length);
+        writer.Write(SigningPublicKey);
+        writer.Write(Timestamp);
+        writer.Write((ushort)Signature.Length);
+        writer.Write(Signature);
     }
 
     public static GetOfflineMessagesMessage DeserializePayload(BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
@@ -366,12 +391,27 @@ public sealed class GetOfflineMessagesMessage : KademliaMessage
             throw new InvalidDataException($"Public key too large: {pubKeyLen}");
         var recipientPublicKey = reader.ReadBytes(pubKeyLen);
 
+        var sigPubKeyLen = reader.ReadByte();
+        if (sigPubKeyLen > PublicKeySize)
+            throw new InvalidDataException($"Signing public key too large: {sigPubKeyLen}");
+        var signingPublicKey = reader.ReadBytes(sigPubKeyLen);
+
+        var timestamp = reader.ReadInt64();
+
+        var sigLen = reader.ReadUInt16();
+        if (sigLen > MaxSignatureSize)
+            throw new InvalidDataException($"Signature too large: {sigLen}");
+        var signature = reader.ReadBytes(sigLen);
+
         return new GetOfflineMessagesMessage
         {
             MessageId = messageId,
             SenderId = senderId,
             SenderPublicKey = senderPublicKey,
-            RecipientPublicKey = recipientPublicKey
+            RecipientPublicKey = recipientPublicKey,
+            SigningPublicKey = signingPublicKey,
+            Timestamp = timestamp,
+            Signature = signature
         };
     }
 }

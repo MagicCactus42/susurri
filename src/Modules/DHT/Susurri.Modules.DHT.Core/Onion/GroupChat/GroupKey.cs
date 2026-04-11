@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using NSec.Cryptography;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.DHT.Core.Onion.GroupChat;
 
@@ -81,7 +82,7 @@ public sealed class GroupKey
         using var wrapKey = KeyDerivation.DeriveKey(
             sharedSecret,
             ReadOnlySpan<byte>.Empty,
-            ReadOnlySpan<byte>.Empty,
+            HkdfContexts.GroupKeyWrap,
             Aead,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
 
@@ -111,7 +112,7 @@ public sealed class GroupKey
         using var wrapKey = KeyDerivation.DeriveKey(
             sharedSecret,
             ReadOnlySpan<byte>.Empty,
-            ReadOnlySpan<byte>.Empty,
+            HkdfContexts.GroupKeyWrap,
             Aead,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
 

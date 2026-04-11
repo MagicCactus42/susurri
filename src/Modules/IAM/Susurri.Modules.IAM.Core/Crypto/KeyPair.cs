@@ -1,3 +1,4 @@
+#nullable enable
 using NSec.Cryptography;
 
 namespace Susurri.Modules.IAM.Core.Crypto;
@@ -10,13 +11,16 @@ public sealed class KeyPair : IDisposable
     public byte[] SigningPublicKey { get; }
     public byte[] EncryptionPublicKey { get; }
 
-    public KeyPair(Key signingKey, Key encryptionKey)
+    public byte[]? DerivationSalt { get; }
+
+    public KeyPair(Key signingKey, Key encryptionKey, byte[]? derivationSalt = null)
     {
         SigningKey = signingKey ?? throw new ArgumentNullException(nameof(signingKey));
         EncryptionKey = encryptionKey ?? throw new ArgumentNullException(nameof(encryptionKey));
 
         SigningPublicKey = signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
         EncryptionPublicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        DerivationSalt = derivationSalt;
     }
 
     public void Dispose()

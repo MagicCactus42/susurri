@@ -1,58 +1,107 @@
+#nullable enable
 using System.Security.Cryptography;
 using System.Text;
 using dotnetstandard_bip39;
 using NSec.Cryptography;
-using Susurri.Modules.IAM.Core.Exceptions;
 
 namespace Susurri.Modules.IAM.Core.Crypto;
 
-// Generates deterministic key pairs from passphrase using BIP39 derivation.
+// Generates key pairs from passphrase using PBKDF2-SHA256 with random salt.
 public sealed class CryptoKeyGenerator : ICryptoKeyGenerator
 {
+    public const int SaltSize = 32;
+    private const int Pbkdf2Iterations = 600_000;
+    private const int SeedSize = 64;
+
     public KeyPair GenerateKeyPair(string passphrase)
     {
-        var bip39Seed = DeriveBip39Seed(passphrase);
-
-        // Derive Ed25519 signing key from first 32 bytes
-        var ed25519Seed = bip39Seed[..32];
-        var signingKey = Key.Import(
-            SignatureAlgorithm.Ed25519,
-            ed25519Seed,
-            KeyBlobFormat.RawPrivateKey);
-
-        // Derive X25519 encryption key from bytes 32-64
-        var x25519Seed = bip39Seed[32..64];
-        var encryptionKey = Key.Import(
-            KeyAgreementAlgorithm.X25519,
-            x25519Seed,
-            KeyBlobFormat.RawPrivateKey);
-
-        return new KeyPair(signingKey, encryptionKey);
+        var salt = new byte[SaltSize];
+        RandomNumberGenerator.Fill(salt);
+        return GenerateKeyPair(passphrase, salt);
     }
 
-    public Key GenerateSigningKey(string passphrase)
+    public KeyPair GenerateKeyPair(string passphrase, byte[] salt)
     {
-        var bip39Seed = DeriveBip39Seed(passphrase);
-        var ed25519Seed = bip39Seed[..32];
-
-        return Key.Import(
-            SignatureAlgorithm.Ed25519,
-            ed25519Seed,
-            KeyBlobFormat.RawPrivateKey);
+        ValidateSalt(salt);
+        var seed = DeriveSeed(passphrase, salt);
+        try
+        {
+            return ImportKeysFromSeed(seed, salt);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(seed);
+        }
     }
 
-    public Key GenerateEncryptionKey(string passphrase)
+    public Key GenerateSigningKey(string passphrase, byte[] salt)
     {
-        var bip39Seed = DeriveBip39Seed(passphrase);
-        var x25519Seed = bip39Seed[32..64];
-
-        return Key.Import(
-            KeyAgreementAlgorithm.X25519,
-            x25519Seed,
-            KeyBlobFormat.RawPrivateKey);
+        ValidateSalt(salt);
+        var seed = DeriveSeed(passphrase, salt);
+        try
+        {
+            return Key.Import(SignatureAlgorithm.Ed25519, seed[..32], KeyBlobFormat.RawPrivateKey);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(seed);
+        }
     }
 
-    private static byte[] DeriveBip39Seed(string passphrase)
+    public Key GenerateEncryptionKey(string passphrase, byte[] salt)
+    {
+        ValidateSalt(salt);
+        var seed = DeriveSeed(passphrase, salt);
+        try
+        {
+            return Key.Import(KeyAgreementAlgorithm.X25519, seed[32..64], KeyBlobFormat.RawPrivateKey);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(seed);
+        }
+    }
+
+    public string GeneratePassphrase(int wordCount = 8)
+    {
+        if (wordCount < 6 || wordCount > 20)
+            throw new ArgumentException("Word count must be between 6 and 20", nameof(wordCount));
+
+        var entropy = new byte[32];
+        RandomNumberGenerator.Fill(entropy);
+        var entropyHex = Convert.ToHexString(entropy).ToLowerInvariant();
+
+        var bip = new BIP39();
+        var fullMnemonic = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
+        var allWords = fullMnemonic.Split(' ');
+
+        return string.Join(" ", allWords.Take(wordCount));
+    }
+
+    public static KeyPair GenerateKeyPairLegacy(string passphrase)
+    {
+        var seed = LegacyDeriveBip39Seed(passphrase);
+        try
+        {
+            return ImportKeysFromSeed(seed, derivationSalt: null);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(seed);
+        }
+    }
+
+    private static byte[] DeriveSeed(string passphrase, byte[] salt)
+    {
+        return Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(passphrase),
+            salt,
+            Pbkdf2Iterations,
+            HashAlgorithmName.SHA256,
+            SeedSize);
+    }
+
+    private static byte[] LegacyDeriveBip39Seed(string passphrase)
     {
         var passphraseBytes = Encoding.UTF8.GetBytes(passphrase);
         var entropyBytes = SHA256.HashData(passphraseBytes);
@@ -61,39 +110,28 @@ public sealed class CryptoKeyGenerator : ICryptoKeyGenerator
         var bip = new BIP39();
         var mnemonicPhrase = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
         var bip39SeedHex = bip.MnemonicToSeedHex(mnemonicPhrase, passphrase);
-        return ConvertHexToBytes(bip39SeedHex);
+        return Convert.FromHexString(bip39SeedHex);
     }
 
-    public string GeneratePassphrase(int wordCount = 12)
+    private static KeyPair ImportKeysFromSeed(byte[] seed, byte[]? derivationSalt)
     {
-        // BIP39 supports 12, 15, 18, 21, 24 words
-        // 12 words = 128 bits entropy, 24 words = 256 bits entropy
-        var validWordCounts = new[] { 12, 15, 18, 21, 24 };
-        if (!validWordCounts.Contains(wordCount))
-            throw new ArgumentException("Word count must be 12, 15, 18, 21, or 24", nameof(wordCount));
+        var signingKey = Key.Import(
+            SignatureAlgorithm.Ed25519,
+            seed[..32],
+            KeyBlobFormat.RawPrivateKey);
 
-        // Calculate entropy bytes needed: wordCount * 11 bits / 8, minus checksum bits
-        // For 12 words: 128 bits = 16 bytes
-        // For 24 words: 256 bits = 32 bytes
-        var entropyBits = wordCount * 11 - wordCount / 3;
-        var entropyBytes = entropyBits / 8;
+        var encryptionKey = Key.Import(
+            KeyAgreementAlgorithm.X25519,
+            seed[32..64],
+            KeyBlobFormat.RawPrivateKey);
 
-        var entropy = new byte[entropyBytes];
-        RandomNumberGenerator.Fill(entropy);
-
-        var entropyHex = Convert.ToHexString(entropy).ToLowerInvariant();
-
-        var bip = new BIP39();
-        return bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
+        return new KeyPair(signingKey, encryptionKey, derivationSalt);
     }
 
-    private static byte[] ConvertHexToBytes(string hex)
+    private static void ValidateSalt(byte[] salt)
     {
-        if (hex.Length % 2 != 0)
-            throw new InvalidHexStringLengthException();
-
-        return Enumerable.Range(0, hex.Length / 2)
-            .Select(i => Convert.ToByte(hex.Substring(i * 2, 2), 16))
-            .ToArray();
+        ArgumentNullException.ThrowIfNull(salt);
+        if (salt.Length != SaltSize)
+            throw new ArgumentException($"Salt must be exactly {SaltSize} bytes", nameof(salt));
     }
 }

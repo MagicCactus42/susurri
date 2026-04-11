@@ -169,7 +169,6 @@ public sealed class GroupManager : IDisposable
             }
             catch
             {
-                // Skip corrupted group files
             }
         }
     }

@@ -4,7 +4,7 @@ namespace Susurri.Modules.DHT.Core.Onion;
 
 public static class MessagePadding
 {
-    public const int DefaultBlockSize = 16 * 1024; // 16KB
+    public const int DefaultBlockSize = 16 * 1024;
     private const int LengthPrefixSize = 4;
 
     public static byte[] Pad(byte[] data, int blockSize = DefaultBlockSize)
@@ -23,13 +23,11 @@ public static class MessagePadding
 
         var padded = new byte[blockSize];
 
-        // Write length prefix (big-endian for consistency)
         padded[0] = (byte)(data.Length >> 24);
         padded[1] = (byte)(data.Length >> 16);
         padded[2] = (byte)(data.Length >> 8);
         padded[3] = (byte)data.Length;
 
-        // Copy original data
         Buffer.BlockCopy(data, 0, padded, LengthPrefixSize, data.Length);
 
         // Fill remaining space with random bytes (not zeros to avoid compression attacks)
@@ -52,7 +50,6 @@ public static class MessagePadding
         if (paddedData.Length < LengthPrefixSize)
             throw new CryptographicException("Invalid padded data");
 
-        // Read length prefix (big-endian)
         var length = (paddedData[0] << 24) | (paddedData[1] << 16) | (paddedData[2] << 8) | paddedData[3];
 
         // Use a single generic exception message for all validation failures

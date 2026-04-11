@@ -6,33 +6,31 @@ using Xunit;
 
 namespace Susurri.Tests.Unit.Onion;
 
-/// <summary>
-/// Unit tests for OnionBuilder and related data structures.
-/// </summary>
 public class OnionBuilderTests
 {
     private readonly Key _senderKey;
     private readonly byte[] _senderPublicKey;
+    private readonly Key _signingKey;
+    private readonly byte[] _signingPublicKey;
 
     public OnionBuilderTests()
     {
         _senderKey = Key.Create(KeyAgreementAlgorithm.X25519);
         _senderPublicKey = _senderKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        _signingKey = Key.Create(SignatureAlgorithm.Ed25519);
+        _signingPublicKey = _signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
     }
 
     [Fact]
     public void Build_WithSingleHop_CreatesOnionPacket()
     {
-        // Arrange
         var builder = new OnionBuilder(_senderKey);
         var message = CreateTestMessage();
         var recipientKey = CreateRandomX25519PublicKey();
         var path = CreateTestPath(1);
 
-        // Act
         var packet = builder.Build(message, recipientKey, path);
 
-        // Assert
         Assert.NotNull(packet);
         Assert.Equal(path[0], packet.FirstHop);
         Assert.NotEmpty(packet.EncryptedPayload);
@@ -42,16 +40,13 @@ public class OnionBuilderTests
     [Fact]
     public void Build_WithMultipleHops_CreatesOnionPacket()
     {
-        // Arrange
         var builder = new OnionBuilder(_senderKey);
         var message = CreateTestMessage();
         var recipientKey = CreateRandomX25519PublicKey();
         var path = CreateTestPath(3);
 
-        // Act
         var packet = builder.Build(message, recipientKey, path);
 
-        // Assert
         Assert.NotNull(packet);
         Assert.Equal(path[0], packet.FirstHop);
         Assert.NotEmpty(packet.EncryptedPayload);
@@ -61,29 +56,57 @@ public class OnionBuilderTests
     [Fact]
     public void Build_EmptyPath_ThrowsArgumentException()
     {
-        // Arrange
         var builder = new OnionBuilder(_senderKey);
         var message = CreateTestMessage();
         var recipientKey = CreateRandomX25519PublicKey();
         var emptyPath = new List<KademliaNode>();
 
-        // Act & Assert
         Assert.Throws<ArgumentException>(() => builder.Build(message, recipientKey, emptyPath));
+    }
+
+    [Fact]
+    public void Build_UnsignedMessage_ThrowsArgumentException()
+    {
+        var builder = new OnionBuilder(_senderKey);
+        var unsignedMessage = new ChatMessage
+        {
+            SenderPublicKey = _senderPublicKey,
+            Content = "unsigned",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+        var recipientKey = CreateRandomX25519PublicKey();
+        var path = CreateTestPath(1);
+
+        Assert.Throws<ArgumentException>(() => builder.Build(unsignedMessage, recipientKey, path));
+    }
+
+    [Fact]
+    public void Build_MissingSigningKey_ThrowsArgumentException()
+    {
+        var builder = new OnionBuilder(_senderKey);
+        var message = new ChatMessage
+        {
+            SenderPublicKey = _senderPublicKey,
+            Content = "has signature but no signing key",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Signature = new byte[64]
+        };
+        var recipientKey = CreateRandomX25519PublicKey();
+        var path = CreateTestPath(1);
+
+        Assert.Throws<ArgumentException>(() => builder.Build(message, recipientKey, path));
     }
 
     [Fact]
     public void Build_ReplyTokensHaveValidStructure()
     {
-        // Arrange
         var builder = new OnionBuilder(_senderKey);
         var message = CreateTestMessage();
         var recipientKey = CreateRandomX25519PublicKey();
         var path = CreateTestPath(3);
 
-        // Act
         var packet = builder.Build(message, recipientKey, path);
 
-        // Assert
         foreach (var token in packet.ReplyTokens)
         {
             Assert.NotEmpty(token.NodePublicKey);
@@ -96,29 +119,29 @@ public class OnionBuilderTests
     [Fact]
     public void Build_GeneratesUniqueEncryptedPayloadPerBuild()
     {
-        // Arrange
         var builder = new OnionBuilder(_senderKey);
         var message = CreateTestMessage();
         var recipientKey = CreateRandomX25519PublicKey();
         var path = CreateTestPath(2);
 
-        // Act
         var packet1 = builder.Build(message, recipientKey, path);
         var packet2 = builder.Build(message, recipientKey, path);
 
-        // Assert - Different ephemeral keys should produce different payloads
         Assert.NotEqual(packet1.EncryptedPayload, packet2.EncryptedPayload);
     }
 
     private ChatMessage CreateTestMessage()
     {
-        return new ChatMessage
+        var message = new ChatMessage
         {
             SenderPublicKey = _senderPublicKey,
+            SenderSigningPublicKey = _signingPublicKey,
             Content = "Hello, World!",
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             MessageId = Guid.NewGuid()
         };
+        message.Signature = SignatureAlgorithm.Ed25519.Sign(_signingKey, message.GetSignableData());
+        return message;
     }
 
     private byte[] CreateRandomX25519PublicKey()
@@ -141,15 +164,134 @@ public class OnionBuilderTests
     }
 }
 
-/// <summary>
-/// Unit tests for ChatMessage serialization.
-/// </summary>
+public class ChatMessageSignatureTests
+{
+    [Fact]
+    public void VerifySignature_ValidSignature_ReturnsTrue()
+    {
+        using var signingKey = Key.Create(SignatureAlgorithm.Ed25519);
+        var sigPubKey = signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+
+        var message = new ChatMessage
+        {
+            SenderPublicKey = new byte[32],
+            SenderSigningPublicKey = sigPubKey,
+            Content = "test",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+        message.Signature = SignatureAlgorithm.Ed25519.Sign(signingKey, message.GetSignableData());
+
+        Assert.True(message.VerifySignature());
+    }
+
+    [Fact]
+    public void VerifySignature_NoSigningKey_ReturnsFalse()
+    {
+        var message = new ChatMessage
+        {
+            SenderPublicKey = new byte[32],
+            Content = "unsigned",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+
+        Assert.False(message.VerifySignature());
+    }
+
+    [Fact]
+    public void VerifySignature_NoSignature_ReturnsFalse()
+    {
+        using var signingKey = Key.Create(SignatureAlgorithm.Ed25519);
+        var message = new ChatMessage
+        {
+            SenderPublicKey = new byte[32],
+            SenderSigningPublicKey = signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey),
+            Content = "no signature field set",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+
+        Assert.False(message.VerifySignature());
+    }
+
+    [Fact]
+    public void VerifySignature_WrongKey_ReturnsFalse()
+    {
+        using var signingKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var wrongKey = Key.Create(SignatureAlgorithm.Ed25519);
+
+        var message = new ChatMessage
+        {
+            SenderPublicKey = new byte[32],
+            SenderSigningPublicKey = wrongKey.PublicKey.Export(KeyBlobFormat.RawPublicKey),
+            Content = "test",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+        message.Signature = SignatureAlgorithm.Ed25519.Sign(signingKey, message.GetSignableData());
+
+        Assert.False(message.VerifySignature());
+    }
+
+    [Fact]
+    public void VerifySignature_TamperedContent_ReturnsFalse()
+    {
+        using var signingKey = Key.Create(SignatureAlgorithm.Ed25519);
+        var sigPubKey = signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+
+        var message = new ChatMessage
+        {
+            SenderPublicKey = new byte[32],
+            SenderSigningPublicKey = sigPubKey,
+            Content = "original",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+        message.Signature = SignatureAlgorithm.Ed25519.Sign(signingKey, message.GetSignableData());
+
+        var tampered = new ChatMessage
+        {
+            SenderPublicKey = message.SenderPublicKey,
+            SenderSigningPublicKey = message.SenderSigningPublicKey,
+            Content = "tampered",
+            Timestamp = message.Timestamp,
+            MessageId = message.MessageId,
+            Signature = message.Signature
+        };
+
+        Assert.False(tampered.VerifySignature());
+    }
+
+    [Fact]
+    public void VerifySignature_StrippedSignature_ReturnsFalse()
+    {
+        using var signingKey = Key.Create(SignatureAlgorithm.Ed25519);
+        var sigPubKey = signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+
+        var message = new ChatMessage
+        {
+            SenderPublicKey = new byte[32],
+            SenderSigningPublicKey = sigPubKey,
+            Content = "signed message",
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+        message.Signature = SignatureAlgorithm.Ed25519.Sign(signingKey, message.GetSignableData());
+
+        var stripped = new ChatMessage
+        {
+            SenderPublicKey = message.SenderPublicKey,
+            SenderSigningPublicKey = Array.Empty<byte>(),
+            Content = message.Content,
+            Timestamp = message.Timestamp,
+            MessageId = message.MessageId,
+            Signature = Array.Empty<byte>()
+        };
+
+        Assert.False(stripped.VerifySignature());
+    }
+}
+
 public class ChatMessageTests
 {
     [Fact]
     public void ChatMessage_RoundTrip_PreservesAllFields()
     {
-        // Arrange
         var senderPubKey = new byte[32];
         Random.Shared.NextBytes(senderPubKey);
 
@@ -161,11 +303,9 @@ public class ChatMessageTests
             MessageId = Guid.NewGuid()
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ChatMessage.Deserialize(serialized);
 
-        // Assert
         Assert.Equal(original.SenderPublicKey, deserialized.SenderPublicKey);
         Assert.Equal(original.Content, deserialized.Content);
         Assert.Equal(original.Timestamp, deserialized.Timestamp);
@@ -175,7 +315,6 @@ public class ChatMessageTests
     [Fact]
     public void ChatMessage_EmptyContent_RoundTrip()
     {
-        // Arrange
         var original = new ChatMessage
         {
             SenderPublicKey = new byte[32],
@@ -183,18 +322,15 @@ public class ChatMessageTests
             Timestamp = 0
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ChatMessage.Deserialize(serialized);
 
-        // Assert
         Assert.Equal(string.Empty, deserialized.Content);
     }
 
     [Fact]
     public void ChatMessage_UnicodeContent_RoundTrip()
     {
-        // Arrange
         var original = new ChatMessage
         {
             SenderPublicKey = new byte[32],
@@ -202,18 +338,15 @@ public class ChatMessageTests
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ChatMessage.Deserialize(serialized);
 
-        // Assert
         Assert.Equal("Hello, 世界! 🌍 مرحبا", deserialized.Content);
     }
 
     [Fact]
     public void ChatMessage_LongContent_RoundTrip()
     {
-        // Arrange
         var longContent = new string('A', 10000);
         var original = new ChatMessage
         {
@@ -222,24 +355,18 @@ public class ChatMessageTests
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ChatMessage.Deserialize(serialized);
 
-        // Assert
         Assert.Equal(longContent, deserialized.Content);
     }
 }
 
-/// <summary>
-/// Unit tests for ReplyPath serialization.
-/// </summary>
 public class ReplyPathTests
 {
     [Fact]
     public void ReplyPath_RoundTrip_PreservesAllFields()
     {
-        // Arrange
         var senderPubKey = new byte[32];
         Random.Shared.NextBytes(senderPubKey);
 
@@ -253,15 +380,17 @@ public class ReplyPathTests
         var original = new ReplyPath
         {
             SenderPublicKey = senderPubKey,
+            FirstHopAddress = "203.0.113.50",
+            FirstHopPort = 9001,
             Tokens = tokens
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ReplyPath.Deserialize(serialized);
 
-        // Assert
         Assert.Equal(senderPubKey, deserialized.SenderPublicKey);
+        Assert.Equal("203.0.113.50", deserialized.FirstHopAddress);
+        Assert.Equal(9001, deserialized.FirstHopPort);
         Assert.Equal(3, deserialized.Tokens.Count);
         for (int i = 0; i < 3; i++)
         {
@@ -272,53 +401,84 @@ public class ReplyPathTests
     [Fact]
     public void ReplyPath_EmptyTokens_RoundTrip()
     {
-        // Arrange
         var original = new ReplyPath
         {
             SenderPublicKey = new byte[32],
+            FirstHopAddress = "10.0.0.1",
+            FirstHopPort = 8080,
             Tokens = new List<byte[]>()
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ReplyPath.Deserialize(serialized);
 
-        // Assert
         Assert.Empty(deserialized.Tokens);
+        Assert.Equal("10.0.0.1", deserialized.FirstHopAddress);
+        Assert.Equal(8080, deserialized.FirstHopPort);
     }
 
     [Fact]
     public void ReplyPath_LargeTokens_RoundTrip()
     {
-        // Arrange
         var largeToken = new byte[1000];
         Random.Shared.NextBytes(largeToken);
 
         var original = new ReplyPath
         {
             SenderPublicKey = new byte[32],
+            FirstHopAddress = "192.168.1.100",
+            FirstHopPort = 3000,
             Tokens = new List<byte[]> { largeToken }
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ReplyPath.Deserialize(serialized);
 
-        // Assert
         Assert.Single(deserialized.Tokens);
         Assert.Equal(largeToken, deserialized.Tokens[0]);
+        Assert.Equal("192.168.1.100", deserialized.FirstHopAddress);
+    }
+
+    [Fact]
+    public void ReplyPath_IPv6FirstHop_RoundTrip()
+    {
+        var original = new ReplyPath
+        {
+            SenderPublicKey = new byte[32],
+            FirstHopAddress = "2001:db8::1",
+            FirstHopPort = 5000,
+            Tokens = new List<byte[]> { new byte[] { 0xAA } }
+        };
+
+        var serialized = original.Serialize();
+        var deserialized = ReplyPath.Deserialize(serialized);
+
+        Assert.Equal("2001:db8::1", deserialized.FirstHopAddress);
+        Assert.Equal(5000, deserialized.FirstHopPort);
+    }
+
+    [Fact]
+    public void ReplyPath_EmptyFirstHop_RoundTrip()
+    {
+        var original = new ReplyPath
+        {
+            SenderPublicKey = new byte[32],
+            Tokens = new List<byte[]>()
+        };
+
+        var serialized = original.Serialize();
+        var deserialized = ReplyPath.Deserialize(serialized);
+
+        Assert.Equal(string.Empty, deserialized.FirstHopAddress);
+        Assert.Equal(0, deserialized.FirstHopPort);
     }
 }
 
-/// <summary>
-/// Unit tests for RecipientPayload serialization.
-/// </summary>
 public class RecipientPayloadTests
 {
     [Fact]
     public void RecipientPayload_RoundTrip_PreservesAllFields()
     {
-        // Arrange
         var message = new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05 };
         var replyPath = new ReplyPath
         {
@@ -332,11 +492,9 @@ public class RecipientPayloadTests
             ReplyPath = replyPath
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = RecipientPayload.Deserialize(serialized);
 
-        // Assert
         Assert.Equal(message, deserialized.Message);
         Assert.Equal(replyPath.SenderPublicKey, deserialized.ReplyPath.SenderPublicKey);
         Assert.Single(deserialized.ReplyPath.Tokens);
@@ -345,31 +503,24 @@ public class RecipientPayloadTests
     [Fact]
     public void RecipientPayload_EmptyMessage_RoundTrip()
     {
-        // Arrange
         var original = new RecipientPayload
         {
             Message = Array.Empty<byte>(),
             ReplyPath = new ReplyPath()
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = RecipientPayload.Deserialize(serialized);
 
-        // Assert
         Assert.Empty(deserialized.Message);
     }
 }
 
-/// <summary>
-/// Unit tests for ReplyTokenContent serialization.
-/// </summary>
 public class ReplyTokenContentTests
 {
     [Fact]
     public void ReplyTokenContent_RoundTrip_PreservesAllFields()
     {
-        // Arrange
         var sessionKey = new byte[32];
         Random.Shared.NextBytes(sessionKey);
 
@@ -380,11 +531,9 @@ public class ReplyTokenContentTests
             SessionKey = sessionKey
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ReplyTokenContent.Deserialize(serialized);
 
-        // Assert
         Assert.Equal("192.168.1.100", deserialized.PreviousHopAddress);
         Assert.Equal(8080, deserialized.PreviousHopPort);
         Assert.Equal(sessionKey, deserialized.SessionKey);
@@ -393,7 +542,6 @@ public class ReplyTokenContentTests
     [Fact]
     public void ReplyTokenContent_SenderAddress_RoundTrip()
     {
-        // Arrange
         var original = new ReplyTokenContent
         {
             PreviousHopAddress = "SENDER",
@@ -401,11 +549,9 @@ public class ReplyTokenContentTests
             SessionKey = new byte[32]
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ReplyTokenContent.Deserialize(serialized);
 
-        // Assert
         Assert.Equal("SENDER", deserialized.PreviousHopAddress);
         Assert.Equal(0, deserialized.PreviousHopPort);
     }
@@ -413,7 +559,6 @@ public class ReplyTokenContentTests
     [Fact]
     public void ReplyTokenContent_IPv6Address_RoundTrip()
     {
-        // Arrange
         var original = new ReplyTokenContent
         {
             PreviousHopAddress = "2001:db8::1",
@@ -421,24 +566,18 @@ public class ReplyTokenContentTests
             SessionKey = new byte[32]
         };
 
-        // Act
         var serialized = original.Serialize();
         var deserialized = ReplyTokenContent.Deserialize(serialized);
 
-        // Assert
         Assert.Equal("2001:db8::1", deserialized.PreviousHopAddress);
     }
 }
 
-/// <summary>
-/// Unit tests for OnionPacket.
-/// </summary>
 public class OnionPacketTests
 {
     [Fact]
     public void OnionPacket_Properties_CanBeSet()
     {
-        // Arrange
         var pubKey = new byte[32];
         Random.Shared.NextBytes(pubKey);
         var id = KademliaId.FromPublicKey(pubKey);
@@ -458,7 +597,6 @@ public class OnionPacketTests
             }
         };
 
-        // Act
         var packet = new OnionPacket
         {
             FirstHop = firstHop,
@@ -466,22 +604,17 @@ public class OnionPacketTests
             ReplyTokens = tokens
         };
 
-        // Assert
         Assert.Equal(firstHop, packet.FirstHop);
         Assert.Equal(payload, packet.EncryptedPayload);
         Assert.Single(packet.ReplyTokens);
     }
 }
 
-/// <summary>
-/// Unit tests for ReplyToken.
-/// </summary>
 public class ReplyTokenTests
 {
     [Fact]
     public void ReplyToken_Properties_CanBeSet()
     {
-        // Arrange
         var nodePubKey = new byte[32];
         var encryptedToken = new byte[100];
         var sessionKey = new byte[32];
@@ -490,7 +623,6 @@ public class ReplyTokenTests
         Random.Shared.NextBytes(encryptedToken);
         Random.Shared.NextBytes(sessionKey);
 
-        // Act
         var token = new ReplyToken
         {
             NodePublicKey = nodePubKey,
@@ -498,7 +630,6 @@ public class ReplyTokenTests
             SessionKey = sessionKey
         };
 
-        // Assert
         Assert.Equal(nodePubKey, token.NodePublicKey);
         Assert.Equal(encryptedToken, token.EncryptedToken);
         Assert.Equal(sessionKey, token.SessionKey);
@@ -507,10 +638,8 @@ public class ReplyTokenTests
     [Fact]
     public void ReplyToken_DefaultValues_AreEmptyArrays()
     {
-        // Arrange & Act
         var token = new ReplyToken();
 
-        // Assert
         Assert.Empty(token.NodePublicKey);
         Assert.Empty(token.EncryptedToken);
         Assert.Empty(token.SessionKey);

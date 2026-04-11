@@ -3,28 +3,20 @@ using System.Net;
 
 namespace Susurri.Modules.DHT.Core.Network;
 
-/// <summary>
-/// Token bucket rate limiter per source IP address.
-/// </summary>
 public sealed class RateLimiter
 {
     private readonly int _maxTokens;
-    private readonly double _refillRate; // tokens per second
+    private readonly double _refillRate;
     private readonly ConcurrentDictionary<string, TokenBucket> _buckets = new();
     private DateTimeOffset _lastCleanup = DateTimeOffset.UtcNow;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(5);
 
-    /// <param name="maxTokens">Maximum burst size (tokens per bucket).</param>
-    /// <param name="refillRatePerSecond">How many tokens are restored per second.</param>
     public RateLimiter(int maxTokens = 50, double refillRatePerSecond = 10.0)
     {
         _maxTokens = maxTokens;
         _refillRate = refillRatePerSecond;
     }
 
-    /// <summary>
-    /// Returns true if the request from this IP is allowed, false if rate-limited.
-    /// </summary>
     public bool IsAllowed(IPEndPoint endpoint)
     {
         var key = endpoint.Address.ToString();
@@ -34,9 +26,6 @@ public sealed class RateLimiter
         return bucket.TryConsume();
     }
 
-    /// <summary>
-    /// Returns true if the request from this IP string is allowed, false if rate-limited.
-    /// </summary>
     public bool IsAllowed(string ipAddress)
     {
         TryCleanup();

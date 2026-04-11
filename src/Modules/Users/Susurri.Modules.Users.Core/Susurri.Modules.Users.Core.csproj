@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <!-- Suppress CS8981 for EF Core generated migrations with lowercase names -->
         <NoWarn>$(NoWarn);CS8981</NoWarn>

@@ -16,12 +16,14 @@ Susurri is a decentralized, privacy-focused chat application that combines Kadem
 - **Kademlia DHT** - Distributed hash table for peer discovery and public key distribution
 - **Onion Routing** - Three-layer encryption for sender anonymity (Tor-like)
 - **End-to-End Encryption** - X25519 key exchange + ChaCha20-Poly1305 AEAD
-- **Deterministic Identity** - BIP39 mnemonic-based key generation; same passphrase = same identity
+- **Deterministic Identity** - PBKDF2-based key generation from passphrase + salt
 - **Message Padding** - Fixed 16KB message blocks to resist traffic analysis attacks
 - **Group Messaging** - Encrypted group chats with shared symmetric key distribution
-- **Passphrase Generation** - Built-in BIP39 mnemonic generator (12-24 words)
+- **Passphrase Generation** - Built-in BIP39 word list generator (12-24 words)
+- **Mandatory Signatures** - Ed25519 signatures required on all messages
+- **HKDF Domain Separation** - Unique context strings per cryptographic operation (RFC 5869)
 - **Credential Caching** - Optional encrypted local storage for credentials
-- **Offline Messages** - DHT stores messages for offline recipients
+- **Offline Messages** - DHT stores encrypted messages for offline recipients; retrieval requires signed proof-of-ownership
 - **Cross-Platform CLI** - Interactive terminal interface for Linux/macOS/Windows
 - **Desktop Integration** - Application menu entries and GUI launcher (Linux)
 
@@ -120,7 +122,7 @@ susurri/
 |-----------|------------|
 | Runtime | .NET 10.0 |
 | Cryptography | NSec (libsodium wrapper) |
-| Key Derivation | BIP39 + HKDF-SHA256 |
+| Key Derivation | PBKDF2-SHA256 (600k iterations) + HKDF-SHA256 |
 | Encryption | X25519 + ChaCha20-Poly1305 |
 | Signing | Ed25519 |
 | Database | PostgreSQL + Entity Framework Core |
@@ -132,18 +134,12 @@ susurri/
 
 ### 1. Identity (IAM Module)
 
-Your identity is derived deterministically from a passphrase:
+Your identity is derived from a passphrase and a random salt:
 
 ```
-Passphrase
+Passphrase + Salt (32 bytes, random)
     │
-    ▼ SHA256
-32-byte entropy
-    │
-    ▼ BIP39
-Mnemonic (24 words)
-    │
-    ▼ PBKDF2
+    ▼ PBKDF2-SHA256 (600,000 iterations)
 64-byte seed
     │
     ├──▶ Bytes [0-32]  → Ed25519 Signing Key
@@ -151,7 +147,7 @@ Mnemonic (24 words)
     └──▶ Bytes [32-64] → X25519 Encryption Key
 ```
 
-**Same passphrase always generates the same keys** - your identity is portable and recoverable.
+The random salt ensures that identical passphrases produce different keys. The salt is stored alongside the derived key material. Passphrase generation uses the BIP39 word list (2048 words) for high-entropy, human-readable passphrases.
 
 ### 2. Peer Discovery (Kademlia DHT)
 
@@ -205,8 +201,10 @@ Each relay only knows the previous and next hop. The recipient knows the sender 
 **Encryption per layer:**
 1. Generate ephemeral X25519 keypair
 2. ECDH key agreement with relay's public key
-3. HKDF-SHA256 key derivation
+3. HKDF-SHA256 key derivation with domain-separated context strings
 4. ChaCha20-Poly1305 authenticated encryption
+
+**Reply path:** Each message includes encrypted reply tokens that allow the recipient to send ACKs and replies back through the same relay chain without knowing the sender's network address.
 
 ### 4. Message Flow
 
@@ -380,7 +378,8 @@ Configuration file: `~/.config/susurri/appsettings.json`
 | **Content Privacy** | E2E encryption with ephemeral keys |
 | **Forward Secrecy** | New ephemeral X25519 keypair per message |
 | **Metadata Protection** | DHT obfuscates lookup patterns |
-| **Identity Portability** | Deterministic BIP39 derivation |
+| **Message Integrity** | Mandatory Ed25519 signatures on all messages |
+| **Identity Portability** | PBKDF2 derivation from passphrase + stored salt |
 
 ### Security Defenses Implemented
 
@@ -396,6 +395,7 @@ The following attack vectors are defended against:
 | **Nonce Reuse** | Fresh random nonce generated for every encryption operation |
 | **Key Recovery** | Ephemeral keys ensure forward secrecy; compromised key doesn't reveal past messages |
 | **Weak Entropy** | All random data from `RandomNumberGenerator` (CSPRNG) |
+| **Key Confusion** | HKDF domain separation with unique context strings per operation (onion layer, direct message, group key wrap, symmetric encryption) per RFC 5869 |
 
 #### Input Validation Defenses
 
@@ -415,6 +415,9 @@ The following attack vectors are defended against:
 | **Oversized Payloads** | Size limits on all protocol messages prevent memory exhaustion |
 | **Invalid Public Keys** | Public key size validated (exactly 32 bytes) before cryptographic operations |
 | **Malformed IP Addresses** | IP address length validated (max 16 bytes) during deserialization |
+| **Offline Message Harvesting** | Retrieval requires Ed25519-signed request with timestamp replay protection (±5 min window) |
+| **Message Forgery** | Ed25519 signatures mandatory on all messages; unsigned messages rejected |
+| **Signature Stripping** | Missing signatures treated as invalid (not backward-compatible); messages without signatures are dropped |
 
 #### Memory Security
 
@@ -448,7 +451,7 @@ The following attack vectors are defended against:
 | **Weak Passphrases** | Minimum 6 words required (enforced); recommended 12-24 BIP39 words |
 | **Passphrase Guessing** | BIP39 wordlist provides 2048 words; 12 words = 128 bits entropy |
 | **User-Generated Weakness** | Built-in cryptographic passphrase generator using CSPRNG |
-| **Passphrase Reuse** | Deterministic keys mean same passphrase = same identity (feature, not bug) |
+| **Passphrase Reuse** | Random 32-byte salt ensures identical passphrases produce different keys |
 
 #### Group Messaging Security
 
@@ -471,6 +474,10 @@ The following attack vectors are defended against:
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────┐│
 │  │ X25519 ECDH │ │ ChaCha20    │ │ PBKDF2 Key Derivation   ││
 │  │ Key Exchange│ │ Poly1305    │ │ (600k iterations)       ││
+│  └─────────────┘ └─────────────┘ └─────────────────────────┘│
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────┐│
+│  │ Ed25519     │ │ HKDF-SHA256 │ │ Domain-separated key    ││
+│  │ Signatures  │ │ (RFC 5869)  │ │ derivation contexts     ││
 │  └─────────────┘ └─────────────┘ └─────────────────────────┘│
 ├─────────────────────────────────────────────────────────────┤
 │                    Storage Layer                             │
@@ -531,7 +538,7 @@ src/
 │   ├── IAM/
 │   │   └── Susurri.Modules.IAM.Core/
 │   │       ├── Crypto/
-│   │       │   ├── CryptoKeyGenerator.cs  # BIP39 key derivation
+│   │       │   ├── CryptoKeyGenerator.cs  # PBKDF2 key derivation
 │   │       │   └── KeyPair.cs
 │   │       └── Keys/
 │   │           ├── KeyStorage.cs
@@ -607,7 +614,7 @@ dotnet test --collect:"XPlat Code Coverage"
 ## Roadmap
 
 - [ ] **NAT Traversal** - STUN/TURN support for nodes behind NAT
-- [ ] **Message Signatures** - Ed25519 signature verification
+- [x] **Message Signatures** - Ed25519 signature verification (mandatory on all messages)
 - [x] **Encrypted Key Storage** - Private keys protected with AES-256-GCM at rest
 - [x] **Input Validation** - Comprehensive validation against injection and DoS
 - [x] **Secure Memory Handling** - Sensitive data wiped from memory after use
@@ -639,7 +646,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 - **Kademlia** - Petar Maymounkov and David Mazières
 - **Tor Project** - Onion routing inspiration
-- **BIP39** - Mnemonic code for deterministic keys
+- **BIP39** - Word list for human-readable passphrase generation
 - **libsodium** - Cryptographic primitives
 - **.NET Community** - Excellent tooling and libraries
 

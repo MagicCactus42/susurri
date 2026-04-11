@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using NSec.Cryptography;
 using Susurri.Modules.DHT.Core.Kademlia;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.DHT.Core.Onion;
 
@@ -24,12 +25,15 @@ public sealed class OnionBuilder
         if (path.Count < 1)
             throw new ArgumentException("Path must have at least one relay node", nameof(path));
 
+        if (message.SenderSigningPublicKey.Length == 0 || message.Signature.Length == 0)
+            throw new ArgumentException("Message must be signed before building onion packet", nameof(message));
+
         var messageBytes = message.Serialize();
         var paddedMessage = MessagePadding.Pad(messageBytes);
         var replyTokens = GenerateReplyTokens(path);
 
-        // Build onion from inside out: first encrypt for recipient, then wrap for each relay
-        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens);
+        var lastHopEndpoint = path[path.Count - 1].EndPoint;
+        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, lastHopEndpoint);
         var currentPayload = recipientLayer;
 
         for (int i = path.Count - 1; i >= 0; i--)
@@ -72,12 +76,14 @@ public sealed class OnionBuilder
         };
     }
 
-    private byte[] BuildRecipientLayer(byte[] message, byte[] recipientPublicKey, IReadOnlyList<ReplyToken> replyTokens)
+    private byte[] BuildRecipientLayer(byte[] message, byte[] recipientPublicKey, IReadOnlyList<ReplyToken> replyTokens, System.Net.IPEndPoint firstReturnHop)
     {
         var replyPath = new ReplyPath
         {
             SenderPublicKey = _senderPublicKey,
-            Tokens = replyTokens.Select(t => t.EncryptedToken).ToList()
+            Tokens = replyTokens.Select(t => t.EncryptedToken).ToList(),
+            FirstHopAddress = firstReturnHop.Address.ToString(),
+            FirstHopPort = firstReturnHop.Port
         };
 
         var recipientPayload = new RecipientPayload
@@ -89,13 +95,10 @@ public sealed class OnionBuilder
         return EncryptLayer(recipientPayload.Serialize(), recipientPublicKey);
     }
 
-    // Each reply token is encrypted for one relay node, containing previous hop info for return path
     private List<ReplyToken> GenerateReplyTokens(IReadOnlyList<KademliaNode> path)
     {
         var tokens = new List<ReplyToken>();
 
-        // Generate a cryptographic nonce that identifies "this is the sender's token"
-        // instead of using plaintext "SENDER"
         var senderMarkerNonce = new byte[32];
         RandomNumberGenerator.Fill(senderMarkerNonce);
 
@@ -139,7 +142,6 @@ public sealed class OnionBuilder
         return tokens;
     }
 
-    // X25519 key exchange + ChaCha20-Poly1305 encryption for each onion layer
     private byte[] EncryptLayer(byte[] plaintext, byte[] recipientPublicKey)
     {
         using var ephemeralKey = Key.Create(KeyExchange);
@@ -154,7 +156,7 @@ public sealed class OnionBuilder
         using var symmetricKey = KeyDerivation.DeriveKey(
             sharedSecret,
             ReadOnlySpan<byte>.Empty,
-            ReadOnlySpan<byte>.Empty,
+            HkdfContexts.OnionLayer,
             Aead,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
 
@@ -193,10 +195,6 @@ public sealed class ReplyToken
     public byte[] NodePublicKey { get; init; } = Array.Empty<byte>();
     public byte[] EncryptedToken { get; init; } = Array.Empty<byte>();
     public byte[] SessionKey { get; init; } = Array.Empty<byte>();
-    /// <summary>
-    /// Only set for the first token (sender's relay). The sender keeps this
-    /// to recognize their own ACK token upon receipt.
-    /// </summary>
     public byte[]? SenderMarkerNonce { get; init; }
 }
 
@@ -205,11 +203,6 @@ public sealed class ReplyTokenContent
     public string PreviousHopAddress { get; init; } = string.Empty;
     public int PreviousHopPort { get; init; }
     public byte[] SessionKey { get; init; } = Array.Empty<byte>();
-    /// <summary>
-    /// A cryptographic nonce that identifies the sender's own token.
-    /// Non-empty only for the first hop (the sender's direct relay).
-    /// Replaces the old plaintext "SENDER" sentinel.
-    /// </summary>
     public byte[] SenderMarker { get; init; } = Array.Empty<byte>();
 
     public bool IsSenderToken => SenderMarker.Length > 0 && string.IsNullOrEmpty(PreviousHopAddress);
@@ -272,7 +265,7 @@ public sealed class RecipientPayload
         return ms.ToArray();
     }
 
-    private const int MaxPayloadSize = 256 * 1024; // 256 KB
+    private const int MaxPayloadSize = 256 * 1024;
 
     public static RecipientPayload Deserialize(byte[] data)
     {
@@ -301,6 +294,10 @@ public sealed class ReplyPath
     public byte[] SenderPublicKey { get; init; } = Array.Empty<byte>();
     public List<byte[]> Tokens { get; init; } = new();
 
+    public string FirstHopAddress { get; init; } = string.Empty;
+
+    public int FirstHopPort { get; init; }
+
     public byte[] Serialize()
     {
         using var ms = new MemoryStream();
@@ -308,6 +305,8 @@ public sealed class ReplyPath
 
         writer.Write((byte)SenderPublicKey.Length);
         writer.Write(SenderPublicKey);
+        writer.Write(FirstHopAddress);
+        writer.Write((ushort)FirstHopPort);
         writer.Write((byte)Tokens.Count);
         foreach (var token in Tokens)
         {
@@ -319,7 +318,7 @@ public sealed class ReplyPath
     }
 
     private const int MaxTokens = 20;
-    private const int MaxTokenSize = 64 * 1024; // 64 KB per token
+    private const int MaxTokenSize = 64 * 1024;
 
     public static ReplyPath Deserialize(byte[] data)
     {
@@ -328,6 +327,9 @@ public sealed class ReplyPath
 
         var pubKeyLen = reader.ReadByte();
         var senderPublicKey = reader.ReadBytes(pubKeyLen);
+
+        var firstHopAddress = reader.ReadString();
+        var firstHopPort = reader.ReadUInt16();
 
         var tokenCount = reader.ReadByte();
         if (tokenCount > MaxTokens)
@@ -345,6 +347,8 @@ public sealed class ReplyPath
         return new ReplyPath
         {
             SenderPublicKey = senderPublicKey,
+            FirstHopAddress = firstHopAddress,
+            FirstHopPort = firstHopPort,
             Tokens = tokens
         };
     }
@@ -359,9 +363,6 @@ public sealed class ChatMessage
     public Guid MessageId { get; init; } = Guid.NewGuid();
     public byte[] Signature { get; set; } = Array.Empty<byte>();
 
-    /// <summary>
-    /// Returns the signable portion of the message (everything except the signature itself).
-    /// </summary>
     public byte[] GetSignableData()
     {
         using var ms = new MemoryStream();
@@ -422,15 +423,10 @@ public sealed class ChatMessage
         };
     }
 
-    /// <summary>
-    /// Verifies the Ed25519 signature on this message.
-    /// Returns true if signature is valid, false otherwise.
-    /// Returns true if no signing key is provided (backwards compat).
-    /// </summary>
     public bool VerifySignature()
     {
         if (SenderSigningPublicKey.Length == 0 || Signature.Length == 0)
-            return true; // No signing key = unverifiable, allow for backward compat
+            return false;
 
         try
         {

@@ -17,13 +17,10 @@ public sealed class ChatService : IAsyncDisposable
     private readonly Key _encryptionKey;
     private readonly Key? _signingKey;
 
-    // Cache of username -> public key mappings
     private readonly ConcurrentDictionary<string, UserPublicKeyRecord> _keyCache = new();
 
-    // Pending messages waiting for ACK
     private readonly ConcurrentDictionary<Guid, PendingMessage> _pendingMessages = new();
 
-    // Received messages
     private readonly ConcurrentDictionary<Guid, ReceivedMessage> _receivedMessages = new();
 
     private const int PathLength = 3;
@@ -112,6 +109,11 @@ public sealed class ChatService : IAsyncDisposable
             }
         }
 
+        if (_signingKey == null)
+        {
+            return new SendResult(false, null, "Cannot send messages without a signing key");
+        }
+
         var message = new ChatMessage
         {
             SenderPublicKey = LocalPublicKey,
@@ -121,12 +123,8 @@ public sealed class ChatService : IAsyncDisposable
             MessageId = Guid.NewGuid()
         };
 
-        // Sign the message if we have a signing key
-        if (_signingKey != null)
-        {
-            message.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
-                _signingKey, message.GetSignableData());
-        }
+        message.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
+            _signingKey, message.GetSignableData());
 
         _pendingMessages[message.MessageId] = new PendingMessage
         {
@@ -271,16 +269,19 @@ public sealed class ChatService : IAsyncDisposable
         if (!_receivedMessages.TryGetValue(originalMessageId, out var original))
             return new SendResult(false, null, "Original message not found");
 
-        // If we know the sender by username, use normal message sending
         if (original.SenderUsername != null)
         {
             return await SendMessageAsync(original.SenderUsername, content);
         }
 
-        // Otherwise use the reply path for anonymous replies
         if (original.ReplyPath.Tokens.Count == 0)
         {
             return new SendResult(false, null, "Cannot reply - no reply path available");
+        }
+
+        if (_signingKey == null)
+        {
+            return new SendResult(false, null, "Cannot send replies without a signing key");
         }
 
         var message = new ChatMessage
@@ -292,11 +293,8 @@ public sealed class ChatService : IAsyncDisposable
             MessageId = Guid.NewGuid()
         };
 
-        if (_signingKey != null)
-        {
-            message.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
-                _signingKey, message.GetSignableData());
-        }
+        message.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
+            _signingKey, message.GetSignableData());
 
         try
         {
