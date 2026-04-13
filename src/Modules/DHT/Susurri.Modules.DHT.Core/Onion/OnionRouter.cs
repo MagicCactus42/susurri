@@ -5,6 +5,9 @@ using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Network;
+using Susurri.Modules.DHT.Core.Services;
+using Susurri.Shared.Abstractions.Diagnostics;
+using Susurri.Shared.Abstractions.Logging;
 using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.DHT.Core.Onion;
@@ -19,8 +22,12 @@ public sealed class OnionRouter
     private readonly KademliaDhtNode _dhtNode;
     private readonly ILogger<OnionRouter> _logger;
     private readonly RateLimiter _rateLimiter = new(maxTokens: 30, refillRatePerSecond: 5.0);
+    private readonly MessageReplayCache _replayCache = new();
+    private static readonly TimeSpan TimestampFreshness = TimeSpan.FromMinutes(5);
 
     public event Func<ChatMessage, ReplyPath, Task>? OnMessageReceived;
+
+    public event Func<FileTransferMessage, ReplyPath, Task>? OnFileTransferReceived;
 
     public event Func<Guid, Task>? OnAckReceived;
 
@@ -33,6 +40,8 @@ public sealed class OnionRouter
 
     public async Task ProcessIncomingAsync(byte[] encryptedPayload, IPEndPoint senderEndpoint)
     {
+        using var activity = InboundActivity.Begin("onion.inbound", senderEndpoint);
+
         if (!_rateLimiter.IsAllowed(senderEndpoint))
         {
             _logger.LogWarning("Rate limited onion message from {Endpoint}", senderEndpoint);
@@ -46,6 +55,7 @@ public sealed class OnionRouter
             var decrypted = DecryptLayer(layer);
             if (decrypted == null)
             {
+                SusurriMetrics.OnionDecryptFailures.Add(1);
                 _logger.LogWarning("Failed to decrypt onion layer");
                 return;
             }
@@ -57,19 +67,19 @@ public sealed class OnionRouter
             switch (content.Type)
             {
                 case OnionLayerType.Relay:
-                    await HandleRelayAsync(content, senderEndpoint);
+                    await HandleRelayAsync(content, senderEndpoint).ConfigureAwait(false);
                     break;
 
                 case OnionLayerType.FinalHop:
-                    await HandleFinalHopAsync(content, senderEndpoint);
+                    await HandleFinalHopAsync(content, senderEndpoint).ConfigureAwait(false);
                     break;
 
                 case OnionLayerType.Delivery:
-                    await HandleDeliveryAsync(content);
+                    await HandleDeliveryAsync(content).ConfigureAwait(false);
                     break;
 
                 case OnionLayerType.Ack:
-                    await HandleAckAsync(content, senderEndpoint);
+                    await HandleAckAsync(content, senderEndpoint).ConfigureAwait(false);
                     break;
             }
         }
@@ -93,20 +103,28 @@ public sealed class OnionRouter
 
             var payload = RecipientPayload.Deserialize(decrypted);
             var unpaddedMessage = MessagePadding.Unpad(payload.Message);
-            var message = ChatMessage.Deserialize(unpaddedMessage);
 
-            if (!message.VerifySignature())
+            if (MessageEnvelope.IsFileTransfer(unpaddedMessage))
             {
-                _logger.LogWarning("Offline message {MessageId} rejected: missing or invalid signature",
-                    message.MessageId);
-                return;
+                await HandleFileTransferDeliveryAsync(unpaddedMessage, payload.ReplyPath).ConfigureAwait(false);
             }
-
-            _logger.LogInformation("Processed offline message {MessageId}", message.MessageId);
-
-            if (OnMessageReceived != null)
+            else
             {
-                await OnMessageReceived(message, payload.ReplyPath);
+                var message = ChatMessage.Deserialize(unpaddedMessage);
+
+                if (!message.VerifySignature())
+                {
+                    _logger.LogWarning("Offline message {MessageId} rejected: missing or invalid signature",
+                        message.MessageId);
+                    return;
+                }
+
+                _logger.LogInformation("Processed offline message {MessageId}", message.MessageId);
+
+                if (OnMessageReceived != null)
+                {
+                    await OnMessageReceived(message, payload.ReplyPath).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception ex)
@@ -120,10 +138,24 @@ public sealed class OnionRouter
         var builder = new OnionBuilder(_encryptionKey);
         var packet = builder.Build(message, recipientPublicKey, path);
 
-        await SendToNodeAsync(packet.FirstHop.EndPoint, packet.EncryptedPayload);
+        await SendToNodeAsync(packet.FirstHop.EndPoint, packet.EncryptedPayload).ConfigureAwait(false);
 
         _logger.LogInformation("Sent onion message {MessageId} via {PathLength} hops",
             message.MessageId, path.Count);
+    }
+
+    /// <summary>
+    /// Sends a raw byte payload (e.g. file transfer message) through onion routing.
+    /// </summary>
+    public async Task SendRawAsync(byte[] rawPayload, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path)
+    {
+        var builder = new OnionBuilder(_encryptionKey);
+        var packet = builder.BuildRaw(rawPayload, recipientPublicKey, path);
+
+        await SendToNodeAsync(packet.FirstHop.EndPoint, packet.EncryptedPayload).ConfigureAwait(false);
+
+        _logger.LogDebug("Sent raw onion payload ({Size} bytes) via {PathLength} hops",
+            rawPayload.Length, path.Count);
     }
 
     public async Task SendAckAsync(Guid messageId, ReplyPath replyPath)
@@ -140,7 +172,7 @@ public sealed class OnionRouter
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
 
-        await SendViaReplyPathAsync(ackContent.Serialize(), replyPath, OnionLayerType.Ack);
+        await SendViaReplyPathAsync(ackContent.Serialize(), replyPath, OnionLayerType.Ack).ConfigureAwait(false);
         _logger.LogInformation("ACK sent for message {MessageId}", messageId);
     }
 
@@ -168,11 +200,11 @@ public sealed class OnionRouter
                 Type = OnionLayerType.Delivery,
                 InnerPayload = encrypted
             };
-            await SendViaReplyPathAsync(deliveryContent.Serialize(), replyPath, OnionLayerType.Relay);
+            await SendViaReplyPathAsync(deliveryContent.Serialize(), replyPath, OnionLayerType.Relay).ConfigureAwait(false);
         }
         else
         {
-            await SendViaReplyPathAsync(paddedMessage, replyPath, OnionLayerType.Relay);
+            await SendViaReplyPathAsync(paddedMessage, replyPath, OnionLayerType.Relay).ConfigureAwait(false);
         }
 
         _logger.LogInformation("Reply sent for message {MessageId}", message.MessageId);
@@ -198,7 +230,7 @@ public sealed class OnionRouter
             IPAddress.TryParse(replyPath.FirstHopAddress, out var firstHopAddress))
         {
             var endpoint = new IPEndPoint(firstHopAddress, replyPath.FirstHopPort);
-            await SendToNodeAsync(endpoint, currentPayload);
+            await SendToNodeAsync(endpoint, currentPayload).ConfigureAwait(false);
         }
         else
         {
@@ -238,9 +270,10 @@ public sealed class OnionRouter
 
         // Random delay (50-500ms) to prevent timing correlation attacks
         var delayMs = Random.Shared.Next(50, 501);
-        await Task.Delay(delayMs);
+        await Task.Delay(delayMs).ConfigureAwait(false);
 
-        await SendToNodeAsync(nextEndpoint, content.InnerPayload);
+        SusurriMetrics.OnionRelayed.Add(1);
+        await SendToNodeAsync(nextEndpoint, content.InnerPayload).ConfigureAwait(false);
     }
 
     private async Task HandleFinalHopAsync(OnionLayerContent content, IPEndPoint senderEndpoint)
@@ -261,7 +294,7 @@ public sealed class OnionRouter
                 Type = OnionLayerType.Delivery,
                 InnerPayload = content.InnerPayload
             };
-            await HandleDeliveryAsync(deliveryContent);
+            await HandleDeliveryAsync(deliveryContent).ConfigureAwait(false);
             return;
         }
 
@@ -277,12 +310,12 @@ public sealed class OnionRouter
                 InnerPayload = content.InnerPayload
             };
             var deliveryPayload = EncryptLayerForNode(deliveryContent.Serialize(), recipientPublicKey);
-            await SendToNodeAsync(recipientNode.EndPoint, deliveryPayload);
+            await SendToNodeAsync(recipientNode.EndPoint, deliveryPayload).ConfigureAwait(false);
             _logger.LogInformation("Message forwarded to recipient node");
         }
         else
         {
-            await _dhtNode.StoreOfflineMessageAsync(recipientPublicKey, content.InnerPayload);
+            await _dhtNode.StoreOfflineMessageAsync(recipientPublicKey, content.InnerPayload).ConfigureAwait(false);
             _logger.LogInformation("Recipient offline, message stored for later delivery");
         }
     }
@@ -324,31 +357,101 @@ public sealed class OnionRouter
     {
         try
         {
+            SusurriMetrics.OnionDelivered.Add(1);
             var payload = RecipientPayload.Deserialize(content.InnerPayload);
             var unpaddedMessage = MessagePadding.Unpad(payload.Message);
-            var message = ChatMessage.Deserialize(unpaddedMessage);
 
-            if (!message.VerifySignature())
+            // Dispatch based on envelope type:
+            // - 0x02 = FileTransferMessage
+            // - anything else (typically 0x20 = pubkey length 32) = ChatMessage
+            if (MessageEnvelope.IsFileTransfer(unpaddedMessage))
             {
-                _logger.LogWarning("Message {MessageId} rejected: missing or invalid signature",
-                    message.MessageId);
-                return;
+                await HandleFileTransferDeliveryAsync(unpaddedMessage, payload.ReplyPath).ConfigureAwait(false);
             }
-            _logger.LogDebug("Message {MessageId} signature verified", message.MessageId);
-
-            _logger.LogInformation("Received message {MessageId} from {Sender}",
-                message.MessageId, Convert.ToHexString(message.SenderPublicKey)[..16]);
-
-            if (OnMessageReceived != null)
+            else
             {
-                await OnMessageReceived(message, payload.ReplyPath);
+                await HandleChatDeliveryAsync(unpaddedMessage, payload.ReplyPath).ConfigureAwait(false);
             }
-
-            await SendAckAsync(message.MessageId, payload.ReplyPath);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling message delivery");
+        }
+    }
+
+    private async Task HandleChatDeliveryAsync(byte[] unpaddedMessage, ReplyPath replyPath)
+    {
+        var message = ChatMessage.Deserialize(unpaddedMessage);
+
+        if (!message.VerifySignature())
+        {
+            SusurriMetrics.AuthFailures.Add(1, new KeyValuePair<string, object?>("kind", "signature"));
+            _logger.LogWarning("Message {MessageId} rejected: missing or invalid signature",
+                message.MessageId);
+            return;
+        }
+
+        if (!MessageReplayCache.IsTimestampFresh(message.Timestamp, TimestampFreshness))
+        {
+            SusurriMetrics.AuthFailures.Add(1, new KeyValuePair<string, object?>("kind", "timestamp"));
+            _logger.LogWarning("Message {MessageId} rejected: stale timestamp", message.MessageId);
+            return;
+        }
+
+        if (!_replayCache.TryRecord(message.MessageId))
+        {
+            SusurriMetrics.ReplaysDropped.Add(1, new KeyValuePair<string, object?>("scope", "onion-chat"));
+            _logger.LogDebug("Replay dropped: chat message {MessageId}", message.MessageId);
+            return;
+        }
+
+        _logger.LogDebug("Message {MessageId} signature verified", message.MessageId);
+
+        _logger.LogInformation("Received message {MessageId} from {SenderFingerprint}",
+            message.MessageId, LogRedaction.KeyFingerprint(message.SenderPublicKey));
+
+        if (OnMessageReceived != null)
+        {
+            await OnMessageReceived(message, replyPath).ConfigureAwait(false);
+        }
+
+        await SendAckAsync(message.MessageId, replyPath).ConfigureAwait(false);
+    }
+
+    private async Task HandleFileTransferDeliveryAsync(byte[] unpaddedMessage, ReplyPath replyPath)
+    {
+        var ftMessage = FileTransferMessage.Deserialize(unpaddedMessage);
+
+        if (!ftMessage.VerifySignature())
+        {
+            SusurriMetrics.AuthFailures.Add(1, new KeyValuePair<string, object?>("kind", "signature"));
+            _logger.LogWarning("File transfer message {MessageId} rejected: invalid signature",
+                ftMessage.MessageId);
+            return;
+        }
+
+        if (!MessageReplayCache.IsTimestampFresh(ftMessage.Timestamp, TimestampFreshness))
+        {
+            SusurriMetrics.AuthFailures.Add(1, new KeyValuePair<string, object?>("kind", "timestamp"));
+            _logger.LogWarning("File transfer message {MessageId} rejected: stale timestamp",
+                ftMessage.MessageId);
+            return;
+        }
+
+        if (!_replayCache.TryRecord(ftMessage.MessageId))
+        {
+            SusurriMetrics.ReplaysDropped.Add(1, new KeyValuePair<string, object?>("scope", "onion-file"));
+            _logger.LogDebug("Replay dropped: file transfer message {MessageId}", ftMessage.MessageId);
+            return;
+        }
+
+        _logger.LogInformation("Received file transfer message {Type} {MessageId} from {SenderFingerprint}",
+            ftMessage.FileType, ftMessage.MessageId,
+            LogRedaction.KeyFingerprint(ftMessage.SenderPublicKey));
+
+        if (OnFileTransferReceived != null)
+        {
+            await OnFileTransferReceived(ftMessage, replyPath).ConfigureAwait(false);
         }
     }
 
@@ -368,11 +471,24 @@ public sealed class OnionRouter
         if (tokenContent.IsSenderToken)
         {
             var ack = AckMessage.Deserialize(content.InnerPayload);
+
+            if (!MessageReplayCache.IsTimestampFresh(ack.Timestamp, TimestampFreshness))
+            {
+                _logger.LogWarning("ACK {MessageId} rejected: stale timestamp", ack.MessageId);
+                return;
+            }
+
+            if (!_replayCache.TryRecord(ack.MessageId))
+            {
+                _logger.LogDebug("Replay dropped: ACK {MessageId}", ack.MessageId);
+                return;
+            }
+
             _logger.LogInformation("Received ACK for message {MessageId}", ack.MessageId);
 
             if (OnAckReceived != null)
             {
-                await OnAckReceived(ack.MessageId);
+                await OnAckReceived(ack.MessageId).ConfigureAwait(false);
             }
         }
         else if (!string.IsNullOrEmpty(tokenContent.PreviousHopAddress))
@@ -381,7 +497,7 @@ public sealed class OnionRouter
                 IPAddress.Parse(tokenContent.PreviousHopAddress),
                 tokenContent.PreviousHopPort);
 
-            await SendToNodeAsync(prevEndpoint, content.InnerPayload);
+            await SendToNodeAsync(prevEndpoint, content.InnerPayload).ConfigureAwait(false);
         }
         else
         {
@@ -420,12 +536,27 @@ public sealed class OnionRouter
         }
     }
 
+    /// <summary>
+    /// Test-only hook: when set, SendToNodeAsync delegates to this Func instead of
+    /// opening a TCP connection. Used by Susurri.Tests.E2E to wire routers together
+    /// in-memory so the full ProcessIncomingAsync → HandleRelayAsync → forward chain
+    /// can be exercised without depending on the (currently broken) production wire
+    /// transport. See KNOWN-LIMITATIONS.md for the production-transport gap.
+    /// </summary>
+    internal Func<IPEndPoint, byte[], Task>? TestSendOverride { get; set; }
+
     private async Task SendToNodeAsync(IPEndPoint endpoint, byte[] payload)
     {
+        if (TestSendOverride != null)
+        {
+            await TestSendOverride(endpoint, payload).ConfigureAwait(false);
+            return;
+        }
+
         try
         {
             using var client = new TcpClient();
-            await client.ConnectAsync(endpoint.Address, endpoint.Port);
+            await client.ConnectAsync(endpoint.Address, endpoint.Port).ConfigureAwait(false);
 
             using var stream = client.GetStream();
             using var writer = new BinaryWriter(stream);

@@ -24,11 +24,11 @@ internal static class ModuleLoader
             {
                 try
                 {
-                    return assembly.GetTypes();
+                    return (IEnumerable<Type>)assembly.GetTypes();
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
-                    return ex.Types.Where(t => t != null)!;
+                    return ex.Types.OfType<Type>();
                 }
                 catch
                 {
@@ -37,7 +37,6 @@ internal static class ModuleLoader
             })
             .Where(x => typeof(IModule).IsAssignableFrom(x) && !x.IsInterface)
             .OrderBy(x => x.Name)
-            .Select(Activator.CreateInstance)
-            .Cast<IModule>()
+            .Select(t => (IModule)Activator.CreateInstance(t)!)
             .ToList();
 }

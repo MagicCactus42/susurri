@@ -67,8 +67,8 @@ public sealed class ChatService : IAsyncDisposable
     {
         LocalUsername = username;
 
-        await _dhtNode.StartAsync(port);
-        await _relayService.StartAsync();
+        await _dhtNode.StartAsync(port).ConfigureAwait(false);
+        await _relayService.StartAsync().ConfigureAwait(false);
 
         if (bootstrapNodes != null)
         {
@@ -78,11 +78,11 @@ public sealed class ChatService : IAsyncDisposable
                 .Select(e => e!)
                 .ToList();
 
-            await _dhtNode.BootstrapAsync(endpoints);
+            await _dhtNode.BootstrapAsync(endpoints).ConfigureAwait(false);
         }
 
-        await _dhtNode.PublishPublicKeyAsync(username);
-        await FetchOfflineMessagesAsync();
+        await _dhtNode.PublishPublicKeyAsync(username).ConfigureAwait(false);
+        await FetchOfflineMessagesAsync().ConfigureAwait(false);
 
         _logger.LogInformation("Chat service started for user {Username} on port {Port}",
             username, port);
@@ -90,7 +90,7 @@ public sealed class ChatService : IAsyncDisposable
 
     public async Task<SendResult> SendMessageAsync(string recipientUsername, string content)
     {
-        var recipientKey = await GetPublicKeyAsync(recipientUsername);
+        var recipientKey = await GetPublicKeyAsync(recipientUsername).ConfigureAwait(false);
         if (recipientKey == null)
         {
             _logger.LogWarning("Could not find public key for user {Username}", recipientUsername);
@@ -136,7 +136,7 @@ public sealed class ChatService : IAsyncDisposable
 
         try
         {
-            await _router.SendMessageAsync(message, recipientKey.EncryptionPublicKey, path);
+            await _router.SendMessageAsync(message, recipientKey.EncryptionPublicKey, path).ConfigureAwait(false);
 
             _pendingMessages[message.MessageId].Status = MessageStatus.Sent;
 
@@ -162,7 +162,7 @@ public sealed class ChatService : IAsyncDisposable
             return cached;
         }
 
-        var record = await _dhtNode.LookupPublicKeyAsync(username);
+        var record = await _dhtNode.LookupPublicKeyAsync(username).ConfigureAwait(false);
         if (record != null)
         {
             _keyCache[username] = record;
@@ -197,7 +197,7 @@ public sealed class ChatService : IAsyncDisposable
 
     private async Task FetchOfflineMessagesAsync()
     {
-        var messages = await _dhtNode.GetOfflineMessagesAsync();
+        var messages = await _dhtNode.GetOfflineMessagesAsync().ConfigureAwait(false);
 
         _logger.LogInformation("Fetched {Count} offline messages", messages.Count);
 
@@ -205,7 +205,7 @@ public sealed class ChatService : IAsyncDisposable
         {
             try
             {
-                await _router.ProcessOfflineMessageAsync(encryptedMessage);
+                await _router.ProcessOfflineMessageAsync(encryptedMessage).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -245,7 +245,7 @@ public sealed class ChatService : IAsyncDisposable
 
         if (OnMessageReceived != null)
         {
-            await OnMessageReceived(received);
+            await OnMessageReceived(received).ConfigureAwait(false);
         }
     }
 
@@ -271,7 +271,7 @@ public sealed class ChatService : IAsyncDisposable
 
         if (original.SenderUsername != null)
         {
-            return await SendMessageAsync(original.SenderUsername, content);
+            return await SendMessageAsync(original.SenderUsername, content).ConfigureAwait(false);
         }
 
         if (original.ReplyPath.Tokens.Count == 0)
@@ -298,7 +298,7 @@ public sealed class ChatService : IAsyncDisposable
 
         try
         {
-            await _router.SendReplyAsync(message, original.ReplyPath);
+            await _router.SendReplyAsync(message, original.ReplyPath).ConfigureAwait(false);
             _logger.LogInformation("Reply {MessageId} sent via reply path", message.MessageId);
             return new SendResult(true, message.MessageId, null);
         }
@@ -321,11 +321,15 @@ public sealed class ChatService : IAsyncDisposable
         return null;
     }
 
+    private bool _disposed;
+
     public async ValueTask DisposeAsync()
     {
-        await _connectionManager.DisposeAsync();
-        await _relayService.DisposeAsync();
-        await _dhtNode.DisposeAsync();
+        if (_disposed) return;
+        _disposed = true;
+        await _connectionManager.DisposeAsync().ConfigureAwait(false);
+        await _relayService.DisposeAsync().ConfigureAwait(false);
+        await _dhtNode.DisposeAsync().ConfigureAwait(false);
     }
 }
 

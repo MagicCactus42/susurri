@@ -14,7 +14,9 @@ namespace Susurri.Bootstrapper;
 /// </summary>
 public partial class App : Application
 {
-    private ServiceProvider _serviceProvider;
+    // Initialized in OnStartup before any code that uses it; null! documents
+    // that the WPF lifecycle (ctor → OnStartup → Window.Show) populates this.
+    private ServiceProvider _serviceProvider = null!;
     private readonly IList<IModule> _modules;
     private readonly IList<Assembly> _assemblies;
 

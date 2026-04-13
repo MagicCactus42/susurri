@@ -20,6 +20,23 @@ public sealed class OnionBuilder
         _senderPublicKey = senderEncryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
     }
 
+    /// <summary>
+    /// Builds an onion packet carrying a raw byte payload (e.g. file transfer messages).
+    /// The payload is padded and wrapped in onion layers identical to chat messages.
+    /// </summary>
+    public OnionPacket BuildRaw(byte[] rawPayload, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path)
+    {
+        if (path.Count < 1)
+            throw new ArgumentException("Path must have at least one relay node", nameof(path));
+
+        var paddedMessage = MessagePadding.Pad(rawPayload);
+        var replyTokens = GenerateReplyTokens(path);
+
+        var lastHopEndpoint = path[path.Count - 1].EndPoint;
+        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, lastHopEndpoint);
+        return WrapOnionLayers(recipientLayer, recipientPublicKey, path, replyTokens);
+    }
+
     public OnionPacket Build(ChatMessage message, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path)
     {
         if (path.Count < 1)
@@ -34,6 +51,15 @@ public sealed class OnionBuilder
 
         var lastHopEndpoint = path[path.Count - 1].EndPoint;
         var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, lastHopEndpoint);
+        return WrapOnionLayers(recipientLayer, recipientPublicKey, path, replyTokens);
+    }
+
+    private OnionPacket WrapOnionLayers(
+        byte[] recipientLayer,
+        byte[] recipientPublicKey,
+        IReadOnlyList<KademliaNode> path,
+        IReadOnlyList<ReplyToken> replyTokens)
+    {
         var currentPayload = recipientLayer;
 
         for (int i = path.Count - 1; i >= 0; i--)

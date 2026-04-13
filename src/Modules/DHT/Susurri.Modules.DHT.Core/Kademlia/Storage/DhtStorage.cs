@@ -20,13 +20,27 @@ public sealed class DhtStorage : IDhtStorage
         if (_store.Count >= MaxStoredValues || Interlocked.Read(ref _estimatedTotalBytes) >= MaxTotalStorageBytes)
         {
             TryCleanup();
-            if (_store.Count >= MaxStoredValues)
+            if (_store.Count >= MaxStoredValues
+                || Interlocked.Read(ref _estimatedTotalBytes) + value.Length > MaxTotalStorageBytes)
                 return;
         }
 
         var expiry = ttl.HasValue ? DateTimeOffset.UtcNow.Add(ttl.Value) : (DateTimeOffset?)null;
-        _store[key] = new StoredValue(value, expiry);
-        Interlocked.Add(ref _estimatedTotalBytes, value.Length);
+        var newStored = new StoredValue(value, expiry);
+
+        _store.AddOrUpdate(
+            key,
+            _ =>
+            {
+                Interlocked.Add(ref _estimatedTotalBytes, value.Length);
+                return newStored;
+            },
+            (_, existing) =>
+            {
+                Interlocked.Add(ref _estimatedTotalBytes, value.Length - existing.Value.Length);
+                return newStored;
+            });
+
         TryCleanup();
     }
 
@@ -41,7 +55,10 @@ public sealed class DhtStorage : IDhtStorage
                 return stored.Value;
             }
 
-            _store.TryRemove(key, out _);
+            if (_store.TryRemove(key, out var removed))
+            {
+                Interlocked.Add(ref _estimatedTotalBytes, -removed.Value.Length);
+            }
         }
 
         return null;
@@ -56,7 +73,10 @@ public sealed class DhtStorage : IDhtStorage
                 return true;
             }
 
-            _store.TryRemove(key, out _);
+            if (_store.TryRemove(key, out var removed))
+            {
+                Interlocked.Add(ref _estimatedTotalBytes, -removed.Value.Length);
+            }
         }
 
         return false;
@@ -64,7 +84,12 @@ public sealed class DhtStorage : IDhtStorage
 
     public bool Remove(KademliaId key)
     {
-        return _store.TryRemove(key, out _);
+        if (_store.TryRemove(key, out var removed))
+        {
+            Interlocked.Add(ref _estimatedTotalBytes, -removed.Value.Length);
+            return true;
+        }
+        return false;
     }
 
     public void StoreOfflineMessage(KademliaId recipientKeyHash, byte[] encryptedMessage, TimeSpan? ttl = null)
@@ -107,6 +132,9 @@ public sealed class DhtStorage : IDhtStorage
         {
             lock (messages)
             {
+                long releasedBytes = messages.Sum(m => (long)m.Data.Length);
+                Interlocked.Add(ref _estimatedTotalBytes, -releasedBytes);
+
                 var validMessages = messages
                     .Where(m => !m.IsExpired)
                     .OrderBy(m => m.StoredAt)
@@ -188,13 +216,21 @@ public sealed class DhtStorage : IDhtStorage
 
             foreach (var key in expiredKeys)
             {
-                _store.TryRemove(key, out _);
+                if (_store.TryRemove(key, out var removed))
+                {
+                    Interlocked.Add(ref _estimatedTotalBytes, -removed.Value.Length);
+                }
             }
 
             foreach (var kvp in _offlineMessages)
             {
                 lock (kvp.Value)
                 {
+                    long expiredBytes = kvp.Value.Where(m => m.IsExpired).Sum(m => (long)m.Data.Length);
+                    if (expiredBytes > 0)
+                    {
+                        Interlocked.Add(ref _estimatedTotalBytes, -expiredBytes);
+                    }
                     kvp.Value.RemoveAll(m => m.IsExpired);
                 }
             }
@@ -209,8 +245,33 @@ public sealed class DhtStorage : IDhtStorage
                 _offlineMessages.TryRemove(key, out _);
             }
 
+            // Self-healing safety net: recompute the total every cleanup pass to correct any drift.
+            Interlocked.Exchange(ref _estimatedTotalBytes, RecomputeTotalBytes());
+
             _lastCleanup = DateTimeOffset.UtcNow;
         }
+    }
+
+    private long RecomputeTotalBytes()
+    {
+        long total = 0;
+        foreach (var kvp in _store)
+        {
+            if (!kvp.Value.IsExpired)
+                total += kvp.Value.Value.Length;
+        }
+        foreach (var kvp in _offlineMessages)
+        {
+            lock (kvp.Value)
+            {
+                foreach (var m in kvp.Value)
+                {
+                    if (!m.IsExpired)
+                        total += m.Data.Length;
+                }
+            }
+        }
+        return total;
     }
 
     private sealed record StoredValue(byte[] Value, DateTimeOffset? Expiry)

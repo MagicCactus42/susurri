@@ -14,5 +14,7 @@ public enum MessageType : byte
     DirectMessage = 0x11,
     StoreOfflineMessage = 0x12,
     GetOfflineMessages = 0x13,
-    OfflineMessagesResponse = 0x14
+    OfflineMessagesResponse = 0x14,
+    HolePunchRequest = 0x15,
+    HolePunchResponse = 0x16
 }

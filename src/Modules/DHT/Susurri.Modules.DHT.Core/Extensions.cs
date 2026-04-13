@@ -5,6 +5,9 @@ using Susurri.Modules.DHT.Core.Kademlia.Storage;
 using Susurri.Modules.DHT.Core.Node;
 
 [assembly: InternalsVisibleTo("Susurri.Modules.DHT.Application")]
+[assembly: InternalsVisibleTo("Susurri.Tests.Unit")]
+[assembly: InternalsVisibleTo("Susurri.Tests.Integration")]
+[assembly: InternalsVisibleTo("Susurri.Tests.E2E")]
 namespace Susurri.Modules.DHT.Core;
 
 internal static class Extensions

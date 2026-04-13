@@ -61,6 +61,8 @@ public abstract class KademliaMessage
             MessageType.StoreOfflineMessage => StoreOfflineMessageMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             MessageType.GetOfflineMessages => GetOfflineMessagesMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             MessageType.OfflineMessagesResponse => OfflineMessagesResponseMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
+            MessageType.HolePunchRequest => HolePunchRequestMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
+            MessageType.HolePunchResponse => HolePunchResponseMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             _ => throw new InvalidDataException($"Unknown message type: {type}")
         };
     }
@@ -226,11 +228,29 @@ public sealed class FindValueResponseMessage : KademliaMessage
 public sealed class StoreMessage : KademliaMessage
 {
     private const int MaxValueSize = 32 * 1024;
+    private const int MaxSignatureSize = 64;
 
     public override MessageType Type => MessageType.Store;
     public KademliaId Key { get; init; }
     public byte[] Value { get; init; } = Array.Empty<byte>();
     public uint TtlSeconds { get; init; }
+    public long Timestamp { get; init; }
+    public byte[] SigningPublicKey { get; init; } = Array.Empty<byte>();
+    public byte[] Signature { get; init; } = Array.Empty<byte>();
+
+    public byte[] GetSignableData()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write(Key.Bytes);
+        writer.Write(Value);
+        writer.Write(TtlSeconds);
+        writer.Write(Timestamp);
+        writer.Write(MessageId.ToByteArray());
+
+        return ms.ToArray();
+    }
 
     protected override void SerializePayload(BinaryWriter writer)
     {
@@ -238,6 +258,11 @@ public sealed class StoreMessage : KademliaMessage
         writer.Write(Value.Length);
         writer.Write(Value);
         writer.Write(TtlSeconds);
+        writer.Write(Timestamp);
+        writer.Write((byte)SigningPublicKey.Length);
+        writer.Write(SigningPublicKey);
+        writer.Write((ushort)Signature.Length);
+        writer.Write(Signature);
     }
 
     public static StoreMessage DeserializePayload(BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
@@ -249,8 +274,30 @@ public sealed class StoreMessage : KademliaMessage
 
         var value = reader.ReadBytes(valueLen);
         var ttl = reader.ReadUInt32();
+        var timestamp = reader.ReadInt64();
 
-        return new StoreMessage { MessageId = messageId, SenderId = senderId, SenderPublicKey = senderPublicKey, Key = key, Value = value, TtlSeconds = ttl };
+        var sigPubKeyLen = reader.ReadByte();
+        if (sigPubKeyLen > PublicKeySize)
+            throw new InvalidDataException($"Signing public key too large: {sigPubKeyLen}");
+        var signingPublicKey = reader.ReadBytes(sigPubKeyLen);
+
+        var sigLen = reader.ReadUInt16();
+        if (sigLen > MaxSignatureSize)
+            throw new InvalidDataException($"Signature too large: {sigLen}");
+        var signature = reader.ReadBytes(sigLen);
+
+        return new StoreMessage
+        {
+            MessageId = messageId,
+            SenderId = senderId,
+            SenderPublicKey = senderPublicKey,
+            Key = key,
+            Value = value,
+            TtlSeconds = ttl,
+            Timestamp = timestamp,
+            SigningPublicKey = signingPublicKey,
+            Signature = signature
+        };
     }
 }
 
@@ -312,10 +359,27 @@ public sealed class OnionMessageWrapper : KademliaMessage
 public sealed class StoreOfflineMessageMessage : KademliaMessage
 {
     private const int MaxPayloadSize = 64 * 1024;
+    private const int MaxSignatureSize = 64;
 
     public override MessageType Type => MessageType.StoreOfflineMessage;
     public byte[] RecipientPublicKey { get; init; } = Array.Empty<byte>();
     public byte[] EncryptedMessage { get; init; } = Array.Empty<byte>();
+    public long Timestamp { get; init; }
+    public byte[] SigningPublicKey { get; init; } = Array.Empty<byte>();
+    public byte[] Signature { get; init; } = Array.Empty<byte>();
+
+    public byte[] GetSignableData()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write(RecipientPublicKey);
+        writer.Write(System.Security.Cryptography.SHA256.HashData(EncryptedMessage));
+        writer.Write(Timestamp);
+        writer.Write(MessageId.ToByteArray());
+
+        return ms.ToArray();
+    }
 
     protected override void SerializePayload(BinaryWriter writer)
     {
@@ -323,6 +387,11 @@ public sealed class StoreOfflineMessageMessage : KademliaMessage
         writer.Write(RecipientPublicKey);
         writer.Write(EncryptedMessage.Length);
         writer.Write(EncryptedMessage);
+        writer.Write(Timestamp);
+        writer.Write((byte)SigningPublicKey.Length);
+        writer.Write(SigningPublicKey);
+        writer.Write((ushort)Signature.Length);
+        writer.Write(Signature);
     }
 
     public static StoreOfflineMessageMessage DeserializePayload(BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
@@ -337,13 +406,28 @@ public sealed class StoreOfflineMessageMessage : KademliaMessage
             throw new InvalidDataException($"Invalid message length: {msgLen}");
         var encryptedMessage = reader.ReadBytes(msgLen);
 
+        var timestamp = reader.ReadInt64();
+
+        var sigPubKeyLen = reader.ReadByte();
+        if (sigPubKeyLen > PublicKeySize)
+            throw new InvalidDataException($"Signing public key too large: {sigPubKeyLen}");
+        var signingPublicKey = reader.ReadBytes(sigPubKeyLen);
+
+        var sigLen = reader.ReadUInt16();
+        if (sigLen > MaxSignatureSize)
+            throw new InvalidDataException($"Signature too large: {sigLen}");
+        var signature = reader.ReadBytes(sigLen);
+
         return new StoreOfflineMessageMessage
         {
             MessageId = messageId,
             SenderId = senderId,
             SenderPublicKey = senderPublicKey,
             RecipientPublicKey = recipientPublicKey,
-            EncryptedMessage = encryptedMessage
+            EncryptedMessage = encryptedMessage,
+            Timestamp = timestamp,
+            SigningPublicKey = signingPublicKey,
+            Signature = signature
         };
     }
 }
@@ -523,5 +607,111 @@ public sealed class NodeRecord
     {
         var endPoint = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(IpAddress), Port);
         return new KademliaNode(Id, PublicKey, endPoint);
+    }
+}
+
+/// <summary>
+/// Sent to an intermediary node to request hole punch coordination with a target peer.
+/// The intermediary forwards the initiator's public endpoint to the target.
+/// </summary>
+public sealed class HolePunchRequestMessage : KademliaMessage
+{
+    private const int MaxEndpointLength = 64;
+
+    public override MessageType Type => MessageType.HolePunchRequest;
+
+    /// <summary>
+    /// The target node to hole punch with.
+    /// </summary>
+    public KademliaId TargetNodeId { get; init; }
+
+    /// <summary>
+    /// The initiator's public UDP endpoint (from STUN), serialized as "IP:port".
+    /// </summary>
+    public string InitiatorEndpoint { get; init; } = string.Empty;
+
+    /// <summary>
+    /// A nonce for this specific hole punch attempt.
+    /// </summary>
+    public Guid PunchId { get; init; } = Guid.NewGuid();
+
+    protected override void SerializePayload(BinaryWriter writer)
+    {
+        writer.Write(TargetNodeId.Bytes);
+        writer.Write(InitiatorEndpoint);
+        writer.Write(PunchId.ToByteArray());
+    }
+
+    public static HolePunchRequestMessage DeserializePayload(
+        BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
+    {
+        var targetNodeId = KademliaId.FromBytes(reader.ReadBytes(32));
+        var initiatorEndpoint = ReadStringWithLimit(reader, MaxEndpointLength);
+        var punchId = new Guid(reader.ReadBytes(16));
+
+        return new HolePunchRequestMessage
+        {
+            MessageId = messageId,
+            SenderId = senderId,
+            SenderPublicKey = senderPublicKey,
+            TargetNodeId = targetNodeId,
+            InitiatorEndpoint = initiatorEndpoint,
+            PunchId = punchId
+        };
+    }
+}
+
+/// <summary>
+/// Sent back to the initiator (via intermediary) with the target's public endpoint
+/// so both sides can begin simultaneous UDP hole punching.
+/// </summary>
+public sealed class HolePunchResponseMessage : KademliaMessage
+{
+    private const int MaxEndpointLength = 64;
+
+    public override MessageType Type => MessageType.HolePunchResponse;
+    public Guid InResponseTo { get; init; }
+
+    /// <summary>
+    /// Whether the target accepted the hole punch request.
+    /// </summary>
+    public bool Accepted { get; init; }
+
+    /// <summary>
+    /// The target's public UDP endpoint (from STUN), serialized as "IP:port".
+    /// </summary>
+    public string TargetEndpoint { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The punch ID echoed back from the request.
+    /// </summary>
+    public Guid PunchId { get; init; }
+
+    protected override void SerializePayload(BinaryWriter writer)
+    {
+        writer.Write(InResponseTo.ToByteArray());
+        writer.Write(Accepted);
+        writer.Write(TargetEndpoint);
+        writer.Write(PunchId.ToByteArray());
+    }
+
+    public static HolePunchResponseMessage DeserializePayload(
+        BinaryReader reader, Guid messageId, KademliaId senderId, byte[] senderPublicKey)
+    {
+        var inResponseTo = new Guid(reader.ReadBytes(16));
+        var accepted = reader.ReadBoolean();
+        var targetEndpoint = ReadStringWithLimit(reader, MaxEndpointLength);
+        var punchId = new Guid(reader.ReadBytes(16));
+
+        return new HolePunchResponseMessage
+        {
+            MessageId = messageId,
+            SenderId = senderId,
+            SenderPublicKey = senderPublicKey,
+            InResponseTo = inResponseTo,
+            Accepted = accepted,
+            TargetEndpoint = targetEndpoint,
+            PunchId = punchId
+        };
     }
 }

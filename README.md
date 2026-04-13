@@ -613,13 +613,13 @@ dotnet test --collect:"XPlat Code Coverage"
 
 ## Roadmap
 
-- [ ] **NAT Traversal** - STUN/TURN support for nodes behind NAT
+- [x] **NAT Traversal** - STUN-based public endpoint discovery, NAT type detection, UDP hole punching
 - [x] **Message Signatures** - Ed25519 signature verification (mandatory on all messages)
 - [x] **Encrypted Key Storage** - Private keys protected with AES-256-GCM at rest
 - [x] **Input Validation** - Comprehensive validation against injection and DoS
 - [x] **Secure Memory Handling** - Sensitive data wiped from memory after use
 - [ ] **Group Chat** - Multi-party encrypted conversations
-- [ ] **File Transfer** - Encrypted file sharing over onion routes
+- [x] **File Transfer** - Chunked file sharing over onion routes with SHA-256 integrity verification
 - [ ] **Mobile Apps** - iOS and Android clients
 - [ ] **Cover Traffic** - Dummy messages to prevent traffic analysis
 - [ ] **Bridge Nodes** - Bypass network restrictions
