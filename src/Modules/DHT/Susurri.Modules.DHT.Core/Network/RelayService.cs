@@ -16,6 +16,7 @@ public sealed class RelayService : IAsyncDisposable
 
     private CancellationTokenSource? _cleanupCts;
     private Task? _cleanupTask;
+    private bool _disposed;
 
     // Configuration
     private static readonly TimeSpan CircuitTimeout = TimeSpan.FromMinutes(5);
@@ -45,7 +46,7 @@ public sealed class RelayService : IAsyncDisposable
         _cleanupCts?.Cancel();
         if (_cleanupTask != null)
         {
-            try { await _cleanupTask; }
+            try { await _cleanupTask.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
         }
 
@@ -57,10 +58,10 @@ public sealed class RelayService : IAsyncDisposable
     {
         return message switch
         {
-            CircuitRequestMessage req => await HandleCircuitRequestAsync(req, sender),
-            RelayDataMessage data => await HandleRelayDataAsync(data, sender),
+            CircuitRequestMessage req => await HandleCircuitRequestAsync(req, sender).ConfigureAwait(false),
+            RelayDataMessage data => await HandleRelayDataAsync(data, sender).ConfigureAwait(false),
             CircuitCloseMessage close => HandleCircuitClose(close, sender),
-            RelayRequestMessage relay => await HandleRelayRequestAsync(relay, sender),
+            RelayRequestMessage relay => await HandleRelayRequestAsync(relay, sender).ConfigureAwait(false),
             RelayResponseMessage response => HandleRelayResponse(response),
             _ => null
         };
@@ -81,7 +82,7 @@ public sealed class RelayService : IAsyncDisposable
 
         if (!expectResponse)
         {
-            await SendRelayMessageAsync(relayNode.EndPoint, request);
+            await SendRelayMessageAsync(relayNode.EndPoint, request).ConfigureAwait(false);
             return null;
         }
 
@@ -90,12 +91,12 @@ public sealed class RelayService : IAsyncDisposable
 
         try
         {
-            await SendRelayMessageAsync(relayNode.EndPoint, request);
+            await SendRelayMessageAsync(relayNode.EndPoint, request).ConfigureAwait(false);
 
             using var cts = new CancellationTokenSource(RelayRequestTimeout);
             cts.Token.Register(() => tcs.TrySetCanceled());
 
-            var response = await tcs.Task;
+            var response = await tcs.Task.ConfigureAwait(false);
             return response.Success ? response.Payload : null;
         }
         catch (OperationCanceledException)
@@ -122,7 +123,7 @@ public sealed class RelayService : IAsyncDisposable
             RequestedBandwidth = 0
         };
 
-        var responseData = await SendAndWaitAsync(relayNode.EndPoint, request);
+        var responseData = await SendAndWaitAsync(relayNode.EndPoint, request).ConfigureAwait(false);
         if (responseData == null) return null;
 
         var response = RelayMessage.Deserialize(responseData) as CircuitResponseMessage;
@@ -167,7 +168,7 @@ public sealed class RelayService : IAsyncDisposable
             Data = data
         };
 
-        await SendRelayMessageAsync(circuit.RequesterEndpoint, message);
+        await SendRelayMessageAsync(circuit.RequesterEndpoint, message).ConfigureAwait(false);
         circuit.LastActivity = DateTimeOffset.UtcNow;
         circuit.BytesRelayed += data.Length;
     }
@@ -177,7 +178,7 @@ public sealed class RelayService : IAsyncDisposable
         if (_circuits.TryRemove(circuitId, out var circuit))
         {
             var message = new CircuitCloseMessage { CircuitId = circuitId };
-            await SendRelayMessageAsync(circuit.RequesterEndpoint, message);
+            await SendRelayMessageAsync(circuit.RequesterEndpoint, message).ConfigureAwait(false);
         }
     }
 
@@ -256,12 +257,12 @@ public sealed class RelayService : IAsyncDisposable
         {
             if (circuit.TargetEndpoint != null)
             {
-                await SendRawAsync(circuit.TargetEndpoint, data.Data);
+                await SendRawAsync(circuit.TargetEndpoint, data.Data).ConfigureAwait(false);
             }
         }
         else
         {
-            await SendRawAsync(circuit.RequesterEndpoint, data.Data);
+            await SendRawAsync(circuit.RequesterEndpoint, data.Data).ConfigureAwait(false);
         }
 
         return null;
@@ -295,7 +296,7 @@ public sealed class RelayService : IAsyncDisposable
         {
             if (request.ExpectResponse)
             {
-                var response = await SendAndWaitAsync(targetNode.EndPoint, request.Payload);
+                var response = await SendAndWaitAsync(targetNode.EndPoint, request.Payload).ConfigureAwait(false);
                 return new RelayResponseMessage
                 {
                     InResponseTo = request.MessageId,
@@ -306,7 +307,7 @@ public sealed class RelayService : IAsyncDisposable
             }
             else
             {
-                await SendRawAsync(targetNode.EndPoint, request.Payload);
+                await SendRawAsync(targetNode.EndPoint, request.Payload).ConfigureAwait(false);
                 return new RelayResponseMessage
                 {
                     InResponseTo = request.MessageId,
@@ -341,7 +342,7 @@ public sealed class RelayService : IAsyncDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(1), ct);
+                await Task.Delay(TimeSpan.FromMinutes(1), ct).ConfigureAwait(false);
 
                 var expiredCircuits = _circuits.Values
                     .Where(c => c.IsExpired(CircuitTimeout))
@@ -367,7 +368,7 @@ public sealed class RelayService : IAsyncDisposable
     private async Task SendRelayMessageAsync(IPEndPoint endpoint, RelayMessage message)
     {
         var data = message.Serialize();
-        await SendRawAsync(endpoint, data);
+        await SendRawAsync(endpoint, data).ConfigureAwait(false);
     }
 
     private async Task SendRawAsync(IPEndPoint endpoint, byte[] data)
@@ -375,7 +376,7 @@ public sealed class RelayService : IAsyncDisposable
         try
         {
             using var client = new TcpClient();
-            await client.ConnectAsync(endpoint.Address, endpoint.Port);
+            await client.ConnectAsync(endpoint.Address, endpoint.Port).ConfigureAwait(false);
 
             using var stream = client.GetStream();
             using var writer = new BinaryWriter(stream);
@@ -392,7 +393,7 @@ public sealed class RelayService : IAsyncDisposable
 
     private async Task<byte[]?> SendAndWaitAsync(IPEndPoint endpoint, RelayMessage message)
     {
-        return await SendAndWaitAsync(endpoint, message.Serialize());
+        return await SendAndWaitAsync(endpoint, message.Serialize()).ConfigureAwait(false);
     }
 
     private async Task<byte[]?> SendAndWaitAsync(IPEndPoint endpoint, byte[] data)
@@ -400,7 +401,7 @@ public sealed class RelayService : IAsyncDisposable
         try
         {
             using var client = new TcpClient();
-            await client.ConnectAsync(endpoint.Address, endpoint.Port);
+            await client.ConnectAsync(endpoint.Address, endpoint.Port).ConfigureAwait(false);
 
             using var stream = client.GetStream();
             using var writer = new BinaryWriter(stream);
@@ -412,7 +413,7 @@ public sealed class RelayService : IAsyncDisposable
             using var cts = new CancellationTokenSource(RelayRequestTimeout);
 
             var lengthTask = reader.ReadInt32Async(cts.Token);
-            var length = await lengthTask;
+            var length = await lengthTask.ConfigureAwait(false);
             return reader.ReadBytes(length);
         }
         catch (Exception ex)
@@ -424,7 +425,9 @@ public sealed class RelayService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync();
+        if (_disposed) return;
+        _disposed = true;
+        await StopAsync().ConfigureAwait(false);
     }
 }
 
@@ -434,7 +437,7 @@ internal static class BinaryReaderExtensions
     {
         var bytes = new byte[4];
         var stream = reader.BaseStream;
-        var read = await stream.ReadAsync(bytes, 0, 4, ct);
+        var read = await stream.ReadAsync(bytes, 0, 4, ct).ConfigureAwait(false);
         if (read < 4) throw new EndOfStreamException();
         return BitConverter.ToInt32(bytes, 0);
     }

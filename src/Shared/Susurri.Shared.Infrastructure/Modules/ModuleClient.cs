@@ -27,7 +27,7 @@ internal sealed class ModuleClient : IModuleClient
             tasks.Add(action(recieverMessage));
         }
         
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     private object TranslateType(object value, Type type)

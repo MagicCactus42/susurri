@@ -43,11 +43,11 @@ public class LoginHandler : ICommandHandler<Login>
         if (command.CacheCredentials && !string.IsNullOrEmpty(command.CachePassword))
         {
             ValidateCachePassword(command.CachePassword);
-            await _credentialsCache.SaveAsync(command.Username, command.Passphrase, command.CachePassword);
+            await _credentialsCache.SaveAsync(command.Username, command.Passphrase, command.CachePassword).ConfigureAwait(false);
             _logger.LogInformation("Credentials cached for user {Username}", command.Username);
         }
 
-        await _messageBroker.PublishAsync(new CredentialsProvided(publicKey, command.Username));
+        await _messageBroker.PublishAsync(new CredentialsProvided(publicKey, command.Username)).ConfigureAwait(false);
 
         _logger.LogInformation("User {Username} logged in successfully", command.Username);
     }

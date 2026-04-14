@@ -26,7 +26,7 @@ public class BackgroundDispatcher : BackgroundService
         {
             try
             {
-                await _moduleClient.PublishAsync(message);
+                await _moduleClient.PublishAsync(message).ConfigureAwait(false);
             }
             catch (Exception exception)
             {

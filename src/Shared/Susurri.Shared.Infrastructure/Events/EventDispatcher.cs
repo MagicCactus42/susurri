@@ -19,6 +19,6 @@ internal sealed class EventDispatcher : IEventDispatcher
 
         var tasks = handlers.Select(x => x.HandleAsync(@event));
         
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 }

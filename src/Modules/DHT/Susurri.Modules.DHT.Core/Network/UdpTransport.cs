@@ -45,7 +45,7 @@ public sealed class UdpTransport : IAsyncDisposable
         {
             try
             {
-                await _receiveTask;
+                await _receiveTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
         }
@@ -58,7 +58,7 @@ public sealed class UdpTransport : IAsyncDisposable
         if (_client == null)
             throw new InvalidOperationException("Transport not started");
 
-        await _client.SendAsync(data, data.Length, endpoint);
+        await _client.SendAsync(data, data.Length, endpoint).ConfigureAwait(false);
     }
 
     public async Task<byte[]?> SendRequestAsync(IPEndPoint endpoint, byte[] data, Guid requestId, TimeSpan timeout)
@@ -68,12 +68,12 @@ public sealed class UdpTransport : IAsyncDisposable
 
         try
         {
-            await SendAsync(endpoint, data);
+            await SendAsync(endpoint, data).ConfigureAwait(false);
 
             using var cts = new CancellationTokenSource(timeout);
             cts.Token.Register(() => tcs.TrySetCanceled());
 
-            return await tcs.Task;
+            return await tcs.Task.ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -99,7 +99,7 @@ public sealed class UdpTransport : IAsyncDisposable
         {
             try
             {
-                var result = await _client!.ReceiveAsync(ct);
+                var result = await _client!.ReceiveAsync(ct).ConfigureAwait(false);
                 _ = HandleDatagramAsync(result.RemoteEndPoint, result.Buffer);
             }
             catch (OperationCanceledException) { break; }
@@ -120,7 +120,7 @@ public sealed class UdpTransport : IAsyncDisposable
         {
             if (OnDatagramReceived != null)
             {
-                await OnDatagramReceived(sender, data);
+                await OnDatagramReceived(sender, data).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -129,8 +129,12 @@ public sealed class UdpTransport : IAsyncDisposable
         }
     }
 
+    private bool _disposed;
+
     public async ValueTask DisposeAsync()
     {
-        await StopAsync();
+        if (_disposed) return;
+        _disposed = true;
+        await StopAsync().ConfigureAwait(false);
     }
 }

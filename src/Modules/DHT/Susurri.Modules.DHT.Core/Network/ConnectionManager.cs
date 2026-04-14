@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Susurri.Modules.DHT.Core.Kademlia;
+using Susurri.Modules.DHT.Core.Kademlia.Protocol;
+using Susurri.Modules.DHT.Core.NatTraversal;
 
 namespace Susurri.Modules.DHT.Core.Network;
 
@@ -11,6 +13,8 @@ public sealed class ConnectionManager : IAsyncDisposable
     private readonly ILogger<ConnectionManager> _logger;
     private readonly RoutingTable _routingTable;
     private readonly RelayService _relayService;
+    private readonly NatTraversalService? _natTraversal;
+    private readonly Func<KademliaNode, HolePunchRequestMessage, Task<HolePunchResponseMessage?>>? _sendHolePunchRequest;
 
     private readonly ConcurrentDictionary<KademliaId, NodeConnection> _connections = new();
 
@@ -22,11 +26,15 @@ public sealed class ConnectionManager : IAsyncDisposable
     public ConnectionManager(
         RoutingTable routingTable,
         RelayService relayService,
-        ILogger<ConnectionManager> logger)
+        ILogger<ConnectionManager> logger,
+        NatTraversalService? natTraversal = null,
+        Func<KademliaNode, HolePunchRequestMessage, Task<HolePunchResponseMessage?>>? sendHolePunchRequest = null)
     {
         _routingTable = routingTable;
         _relayService = relayService;
         _logger = logger;
+        _natTraversal = natTraversal;
+        _sendHolePunchRequest = sendHolePunchRequest;
     }
 
     public async Task<NodeConnection?> GetConnectionAsync(KademliaId nodeId)
@@ -46,7 +54,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             return null;
         }
 
-        var connection = await EstablishConnectionAsync(targetNode);
+        var connection = await EstablishConnectionAsync(targetNode).ConfigureAwait(false);
 
         if (connection != null)
         {
@@ -58,7 +66,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     public async Task<bool> SendAsync(KademliaId nodeId, byte[] data)
     {
-        var connection = await GetConnectionAsync(nodeId);
+        var connection = await GetConnectionAsync(nodeId).ConfigureAwait(false);
         if (connection == null)
         {
             return false;
@@ -66,7 +74,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
         try
         {
-            await connection.SendAsync(data);
+            await connection.SendAsync(data).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex)
@@ -75,16 +83,19 @@ public sealed class ConnectionManager : IAsyncDisposable
                 nodeId.ToString()[..16]);
 
             _connections.TryRemove(nodeId, out _);
-            connection = await GetConnectionAsync(nodeId);
+            connection = await GetConnectionAsync(nodeId).ConfigureAwait(false);
 
             if (connection != null)
             {
                 try
                 {
-                    await connection.SendAsync(data);
+                    await connection.SendAsync(data).ConfigureAwait(false);
                     return true;
                 }
-                catch { }
+                catch (Exception retryEx)
+                {
+                    _logger.LogDebug(retryEx, "Send retry to {NodeId} failed", nodeId.ToString()[..16]);
+                }
             }
 
             return false;
@@ -93,7 +104,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     public async Task<byte[]?> SendAndReceiveAsync(KademliaId nodeId, byte[] data, TimeSpan timeout)
     {
-        var connection = await GetConnectionAsync(nodeId);
+        var connection = await GetConnectionAsync(nodeId).ConfigureAwait(false);
         if (connection == null)
         {
             return null;
@@ -101,7 +112,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
         try
         {
-            return await connection.SendAndReceiveAsync(data, timeout);
+            return await connection.SendAndReceiveAsync(data, timeout).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -115,7 +126,7 @@ public sealed class ConnectionManager : IAsyncDisposable
     {
         if (_connections.TryRemove(nodeId, out var connection))
         {
-            await connection.DisposeAsync();
+            await connection.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -128,7 +139,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
         foreach (var nodeId in idleConnections)
         {
-            await CloseConnectionAsync(nodeId);
+            await CloseConnectionAsync(nodeId).ConfigureAwait(false);
         }
     }
 
@@ -136,16 +147,28 @@ public sealed class ConnectionManager : IAsyncDisposable
     {
         _logger.LogDebug("Establishing connection to {NodeId}", targetNode.Id.ToString()[..16]);
 
-        var directConnection = await TryDirectConnectionAsync(targetNode);
+        // Step 1: Try direct TCP connection
+        var directConnection = await TryDirectConnectionAsync(targetNode).ConfigureAwait(false);
         if (directConnection != null)
         {
             _logger.LogDebug("Direct connection established to {NodeId}", targetNode.Id.ToString()[..16]);
             return directConnection;
         }
 
-        _logger.LogDebug("Direct connection failed to {NodeId}, trying relay", targetNode.Id.ToString()[..16]);
+        // Step 2: Try UDP hole punching (if NAT traversal is available and capable)
+        _logger.LogDebug("Direct connection failed to {NodeId}, trying hole punch", targetNode.Id.ToString()[..16]);
 
-        var relayConnection = await TryRelayConnectionAsync(targetNode);
+        var holePunchConnection = await TryHolePunchConnectionAsync(targetNode).ConfigureAwait(false);
+        if (holePunchConnection != null)
+        {
+            _logger.LogDebug("Hole punch connection established to {NodeId}", targetNode.Id.ToString()[..16]);
+            return holePunchConnection;
+        }
+
+        // Step 3: Fall back to relay
+        _logger.LogDebug("Hole punch failed to {NodeId}, trying relay", targetNode.Id.ToString()[..16]);
+
+        var relayConnection = await TryRelayConnectionAsync(targetNode).ConfigureAwait(false);
         if (relayConnection != null)
         {
             _logger.LogDebug("Relay connection established to {NodeId}", targetNode.Id.ToString()[..16]);
@@ -163,7 +186,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             var client = new TcpClient();
 
             using var cts = new CancellationTokenSource(DirectConnectTimeout);
-            await client.ConnectAsync(targetNode.EndPoint.Address, targetNode.EndPoint.Port, cts.Token);
+            await client.ConnectAsync(targetNode.EndPoint.Address, targetNode.EndPoint.Port, cts.Token).ConfigureAwait(false);
 
             return new NodeConnection
             {
@@ -178,6 +201,82 @@ public sealed class ConnectionManager : IAsyncDisposable
             _logger.LogDebug(ex, "Direct connection to {Endpoint} failed", targetNode.EndPoint);
             return null;
         }
+    }
+
+    private async Task<NodeConnection?> TryHolePunchConnectionAsync(KademliaNode targetNode)
+    {
+        if (_natTraversal == null || !_natTraversal.CanHolePunch || _sendHolePunchRequest == null)
+            return null;
+
+        try
+        {
+            var punchId = Guid.NewGuid();
+            var localEndpointStr = _natTraversal.GetPublicEndpointString();
+
+            if (string.IsNullOrEmpty(localEndpointStr))
+                return null;
+
+            // Send hole punch request to the target via an intermediary node
+            var intermediary = FindIntermediaryFor(targetNode);
+            if (intermediary == null)
+            {
+                _logger.LogDebug("No intermediary available for hole punch to {NodeId}",
+                    targetNode.Id.ToString()[..16]);
+                return null;
+            }
+
+            var request = new HolePunchRequestMessage
+            {
+                SenderId = _routingTable.LocalId,
+                SenderPublicKey = Array.Empty<byte>(), // filled by caller
+                TargetNodeId = targetNode.Id,
+                InitiatorEndpoint = localEndpointStr,
+                PunchId = punchId
+            };
+
+            var response = await _sendHolePunchRequest(intermediary, request).ConfigureAwait(false);
+
+            if (response == null || !response.Accepted)
+            {
+                _logger.LogDebug("Hole punch request rejected or timed out for {NodeId}",
+                    targetNode.Id.ToString()[..16]);
+                return null;
+            }
+
+            var remoteEndpoint = NatTraversalService.ParseEndpoint(response.TargetEndpoint);
+            if (remoteEndpoint == null)
+            {
+                _logger.LogDebug("Invalid target endpoint in hole punch response: {Ep}",
+                    response.TargetEndpoint);
+                return null;
+            }
+
+            // Both sides now punch simultaneously
+            var result = await _natTraversal.HolePunchAsync(punchId, remoteEndpoint).ConfigureAwait(false);
+            if (result == null)
+                return null;
+
+            return new NodeConnection
+            {
+                NodeId = targetNode.Id,
+                Type = ConnectionType.HolePunched,
+                UdpClient = result.Client,
+                Endpoint = result.RemoteEndPoint
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Hole punch to {NodeId} failed", targetNode.Id.ToString()[..16]);
+            return null;
+        }
+    }
+
+    private KademliaNode? FindIntermediaryFor(KademliaNode targetNode)
+    {
+        // Find a node that is likely to know the target - pick from our routing table
+        // excluding the target itself
+        return _routingTable.GetRandomNodes(5)
+            .FirstOrDefault(n => n.Id != targetNode.Id);
     }
 
     private async Task<NodeConnection?> TryRelayConnectionAsync(KademliaNode targetNode)
@@ -197,7 +296,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             try
             {
-                var circuit = await _relayService.EstablishCircuitAsync(relayNode, targetNode.Id);
+                var circuit = await _relayService.EstablishCircuitAsync(relayNode, targetNode.Id).ConfigureAwait(false);
 
                 if (circuit != null)
                 {
@@ -220,11 +319,15 @@ public sealed class ConnectionManager : IAsyncDisposable
         return null;
     }
 
+    private bool _disposed;
+
     public async ValueTask DisposeAsync()
     {
+        if (_disposed) return;
+        _disposed = true;
         foreach (var connection in _connections.Values)
         {
-            await connection.DisposeAsync();
+            await connection.DisposeAsync().ConfigureAwait(false);
         }
         _connections.Clear();
     }
@@ -237,6 +340,7 @@ public sealed class NodeConnection : IAsyncDisposable
     public DateTimeOffset LastUsed { get; set; } = DateTimeOffset.UtcNow;
 
     public TcpClient? TcpClient { get; init; }
+    public UdpClient? UdpClient { get; init; }
     public IPEndPoint? Endpoint { get; init; }
 
     public KademliaNode? RelayNode { get; init; }
@@ -246,6 +350,7 @@ public sealed class NodeConnection : IAsyncDisposable
     public bool IsValid => Type switch
     {
         ConnectionType.Direct => TcpClient?.Connected ?? false,
+        ConnectionType.HolePunched => UdpClient != null && Endpoint != null,
         ConnectionType.Relayed => RelayCircuit != null,
         _ => false
     };
@@ -257,11 +362,15 @@ public sealed class NodeConnection : IAsyncDisposable
         switch (Type)
         {
             case ConnectionType.Direct:
-                await SendDirectAsync(data);
+                await SendDirectAsync(data).ConfigureAwait(false);
+                break;
+
+            case ConnectionType.HolePunched:
+                await SendUdpAsync(data).ConfigureAwait(false);
                 break;
 
             case ConnectionType.Relayed:
-                await SendRelayedAsync(data);
+                await SendRelayedAsync(data).ConfigureAwait(false);
                 break;
 
             default:
@@ -276,10 +385,13 @@ public sealed class NodeConnection : IAsyncDisposable
         switch (Type)
         {
             case ConnectionType.Direct:
-                return await SendAndReceiveDirectAsync(data, timeout);
+                return await SendAndReceiveDirectAsync(data, timeout).ConfigureAwait(false);
+
+            case ConnectionType.HolePunched:
+                return await SendAndReceiveUdpAsync(data, timeout).ConfigureAwait(false);
 
             case ConnectionType.Relayed:
-                return await SendAndReceiveRelayedAsync(data, timeout);
+                return await SendAndReceiveRelayedAsync(data, timeout).ConfigureAwait(false);
 
             default:
                 throw new InvalidOperationException($"Unknown connection type: {Type}");
@@ -296,7 +408,7 @@ public sealed class NodeConnection : IAsyncDisposable
 
         writer.Write(data.Length);
         writer.Write(data);
-        await stream.FlushAsync();
+        await stream.FlushAsync().ConfigureAwait(false);
     }
 
     private async Task<byte[]?> SendAndReceiveDirectAsync(byte[] data, TimeSpan timeout)
@@ -310,7 +422,7 @@ public sealed class NodeConnection : IAsyncDisposable
 
         writer.Write(data.Length);
         writer.Write(data);
-        await stream.FlushAsync();
+        await stream.FlushAsync().ConfigureAwait(false);
 
         TcpClient.ReceiveTimeout = (int)timeout.TotalMilliseconds;
 
@@ -325,12 +437,52 @@ public sealed class NodeConnection : IAsyncDisposable
         }
     }
 
+    private async Task SendUdpAsync(byte[] data)
+    {
+        if (UdpClient == null || Endpoint == null)
+            throw new InvalidOperationException("UDP not connected");
+
+        // UDP framing: 4-byte length prefix + data
+        var framed = new byte[4 + data.Length];
+        BitConverter.TryWriteBytes(framed.AsSpan(0, 4), data.Length);
+        data.CopyTo(framed, 4);
+
+        await UdpClient.SendAsync(framed, framed.Length, Endpoint).ConfigureAwait(false);
+    }
+
+    private async Task<byte[]?> SendAndReceiveUdpAsync(byte[] data, TimeSpan timeout)
+    {
+        if (UdpClient == null || Endpoint == null)
+            throw new InvalidOperationException("UDP not connected");
+
+        await SendUdpAsync(data).ConfigureAwait(false);
+
+        using var cts = new CancellationTokenSource(timeout);
+
+        try
+        {
+            var result = await UdpClient.ReceiveAsync(cts.Token).ConfigureAwait(false);
+            if (result.Buffer.Length < 4)
+                return null;
+
+            var length = BitConverter.ToInt32(result.Buffer, 0);
+            if (length <= 0 || length > result.Buffer.Length - 4)
+                return null;
+
+            return result.Buffer.AsSpan(4, length).ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
     private async Task SendRelayedAsync(byte[] data)
     {
         if (RelayCircuit == null || RelayService == null)
             throw new InvalidOperationException("Not connected via relay");
 
-        await RelayService.SendThroughCircuitAsync(RelayCircuit.CircuitId, data);
+        await RelayService.SendThroughCircuitAsync(RelayCircuit.CircuitId, data).ConfigureAwait(false);
     }
 
     private async Task<byte[]?> SendAndReceiveRelayedAsync(byte[] data, TimeSpan timeout)
@@ -338,7 +490,7 @@ public sealed class NodeConnection : IAsyncDisposable
         if (RelayNode == null || RelayService == null)
             throw new InvalidOperationException("Not connected via relay");
 
-        return await RelayService.RelayToNodeAsync(RelayNode, NodeId, data, expectResponse: true);
+        return await RelayService.RelayToNodeAsync(RelayNode, NodeId, data, expectResponse: true).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -349,9 +501,11 @@ public sealed class NodeConnection : IAsyncDisposable
             TcpClient.Dispose();
         }
 
+        UdpClient?.Dispose();
+
         if (RelayCircuit != null && RelayService != null)
         {
-            await RelayService.CloseCircuitAsync(RelayCircuit.CircuitId);
+            await RelayService.CloseCircuitAsync(RelayCircuit.CircuitId).ConfigureAwait(false);
         }
     }
 }
@@ -359,5 +513,6 @@ public sealed class NodeConnection : IAsyncDisposable
 public enum ConnectionType
 {
     Direct,
+    HolePunched,
     Relayed
 }

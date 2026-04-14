@@ -32,13 +32,13 @@ internal sealed class InMemoryMessageBroker : IMessageBroker
         {
             if (_messagingOptions.UseBackgroundDispatcher)
             {
-                await _asyncMessageDispatcher.PublishAsync(message);
+                await _asyncMessageDispatcher.PublishAsync(message).ConfigureAwait(false);
                 continue;
             }
             
             tasks.Add(_moduleClient.PublishAsync(message));   
         }
         
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 }

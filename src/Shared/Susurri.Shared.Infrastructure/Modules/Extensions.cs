@@ -24,11 +24,11 @@ internal static class Extensions
         {
             try
             {
-                return a.GetTypes();
+                return (IEnumerable<Type>)a.GetTypes();
             }
             catch (ReflectionTypeLoadException ex)
             {
-                return ex.Types.Where(t => t != null)!;
+                return ex.Types.OfType<Type>();
             }
         }).ToArray();
 
@@ -38,12 +38,16 @@ internal static class Extensions
         {
             var eventDispatcher = sp.GetRequiredService<IEventDispatcher>();
             var eventDispatcherType = eventDispatcher.GetType();
-            
+
             foreach (var type in eventTypes)
             {
-                registry.AddBroadcastAction(type, @event => (Task) eventDispatcherType
-                    .GetMethod(nameof(eventDispatcher.PublishAsync))?
-                    .MakeGenericMethod(type).Invoke(eventDispatcher, new[] {@event}));
+                var publishMethod = eventDispatcherType.GetMethod(nameof(eventDispatcher.PublishAsync))
+                    ?? throw new InvalidOperationException(
+                        $"{eventDispatcherType.Name} is missing required method PublishAsync");
+
+                registry.AddBroadcastAction(type, @event => (Task)publishMethod
+                    .MakeGenericMethod(type)
+                    .Invoke(eventDispatcher, new[] { @event })!);
             }
 
             return registry;

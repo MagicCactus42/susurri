@@ -51,7 +51,7 @@ internal sealed class CredentialsCache : ICredentialsCache
             Directory.CreateDirectory(directory);
             SetSecureDirectoryPermissions(directory);
 
-            await File.WriteAllBytesAsync(CachePath, payload);
+            await File.WriteAllBytesAsync(CachePath, payload).ConfigureAwait(false);
 
             CryptographicOperations.ZeroMemory(ciphertext);
         }
@@ -134,12 +134,12 @@ internal sealed class CredentialsCache : ICredentialsCache
 
     private static byte[] DeriveKey(string password, byte[] salt)
     {
-        using var pbkdf2 = new Rfc2898DeriveBytes(
+        return Rfc2898DeriveBytes.Pbkdf2(
             password,
             salt,
             KeyDerivationIterations,
-            HashAlgorithmName.SHA256);
-        return pbkdf2.GetBytes(32);
+            HashAlgorithmName.SHA256,
+            outputLength: 32);
     }
 
     private static void ValidatePassword(string password)
