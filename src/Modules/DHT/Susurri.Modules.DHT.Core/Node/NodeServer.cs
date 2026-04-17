@@ -3,13 +3,18 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Susurri.Modules.DHT.Core.Network;
+using Susurri.Shared.Abstractions.Diagnostics;
 
 namespace Susurri.Modules.DHT.Core.Node;
 
 public class NodeServer
 {
+    private static readonly TimeSpan ShutdownDrainTimeout = TimeSpan.FromSeconds(5);
+
     private readonly int _port;
     private readonly ILogger<NodeServer> _logger;
+    private readonly BackgroundTaskRunner _handlers;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
 
@@ -19,6 +24,7 @@ public class NodeServer
     {
         _port = port;
         _logger = logger;
+        _handlers = new BackgroundTaskRunner(logger);
         NodeId = GenerateNodeId(IPAddress.Loopback.ToString(), port);
     }
 
@@ -34,8 +40,9 @@ public class NodeServer
         {
             while (!_cts.Token.IsCancellationRequested)
             {
-                var client = await _listener.AcceptTcpClientAsync(_cts.Token);
-                _ = HandleClientAsync(client);
+                var client = await _listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
+                var endpoint = client.Client.RemoteEndPoint?.ToString() ?? "<unknown>";
+                _handlers.Run(() => HandleClientAsync(client), $"NodeServer client {endpoint}");
             }
         }
         catch (OperationCanceledException)
@@ -56,11 +63,35 @@ public class NodeServer
     {
         _cts?.Cancel();
         _listener?.Stop();
+
+        // Drain in-flight client handlers (best-effort; this is a sync API so
+        // we don't await — see StopAsync for the awaitable variant).
+        _ = _handlers.DrainAsync(ShutdownDrainTimeout);
+
+        _logger.LogInformation("Node stopped.");
+    }
+
+    /// <summary>
+    /// Awaitable shutdown that drains in-flight client handlers before returning.
+    /// Prefer this over <see cref="Stop"/> when the caller is async.
+    /// </summary>
+    public async Task StopAsync()
+    {
+        _cts?.Cancel();
+        _listener?.Stop();
+
+        var drained = await _handlers.DrainAsync(ShutdownDrainTimeout).ConfigureAwait(false);
+        if (!drained)
+            _logger.LogWarning("Node stopped with in-flight handlers abandoned after {Timeout}",
+                ShutdownDrainTimeout);
+
         _logger.LogInformation("Node stopped.");
     }
 
     private async Task HandleClientAsync(TcpClient client)
     {
+        var remoteEndpoint = client.Client.RemoteEndPoint as IPEndPoint;
+        using var activity = InboundActivity.Begin("node.inbound", remoteEndpoint);
         try
         {
             client.ReceiveTimeout = 5_000; // 5 second read timeout (anti-slowloris)
@@ -71,7 +102,7 @@ public class NodeServer
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var message = await reader.ReadLineAsync(cts.Token);
+            var message = await reader.ReadLineAsync(cts.Token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(message))
                 return;
 
@@ -91,7 +122,7 @@ public class NodeServer
                 _ => "UNKNOWN_COMMAND"
             };
 
-            await writer.WriteLineAsync(response);
+            await writer.WriteLineAsync(response).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

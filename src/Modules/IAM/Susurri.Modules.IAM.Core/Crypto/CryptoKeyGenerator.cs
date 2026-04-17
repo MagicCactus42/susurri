@@ -1,8 +1,10 @@
 #nullable enable
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using dotnetstandard_bip39;
 using NSec.Cryptography;
+using Susurri.Shared.Abstractions.Diagnostics;
 
 namespace Susurri.Modules.IAM.Core.Crypto;
 
@@ -93,12 +95,23 @@ public sealed class CryptoKeyGenerator : ICryptoKeyGenerator
 
     private static byte[] DeriveSeed(string passphrase, byte[] salt)
     {
-        return Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(passphrase),
-            salt,
-            Pbkdf2Iterations,
-            HashAlgorithmName.SHA256,
-            SeedSize);
+        // PBKDF2 with 600k iterations is intentionally slow; record the
+        // duration so operators can spot environments where it's faster than
+        // expected (weakened iteration count, hardware-accel divergence).
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            return Rfc2898DeriveBytes.Pbkdf2(
+                Encoding.UTF8.GetBytes(passphrase),
+                salt,
+                Pbkdf2Iterations,
+                HashAlgorithmName.SHA256,
+                SeedSize);
+        }
+        finally
+        {
+            SusurriMetrics.Pbkdf2DeriveMs.Record(Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+        }
     }
 
     private static byte[] LegacyDeriveBip39Seed(string passphrase)
