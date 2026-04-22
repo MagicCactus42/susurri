@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    Repo-wide build settings. Inherited by every csproj unless overridden.
+
+    Strictness applied in Phase 2.4 of the production-readiness roadmap.
+
+    Notes:
+      * Nullable + ImplicitUsings + LangVersion=latest match modern .NET 10 defaults.
+      * TreatWarningsAsErrors lifts the build's quality bar — every new warning
+        becomes a failure, forcing fixes (or explicit, justified suppressions).
+      * NuGetAuditMode=direct: NU190x (vulnerable transitive dependency) is no
+        longer fatal because we don't choose those — the upstream package owners do.
+        This lets us flip TreatWarningsAsErrors on without being blocked by
+        Avalonia's transitive Tmds.DBus.Protocol 0.20.0 advisory. We still see
+        the audit info in restore logs, just non-fatal.
+      * AnalysisLevel is intentionally NOT set to "latest-recommended" — that pulls
+        in hundreds of CA/IDE diagnostics and is its own dedicated cleanup pass
+        (tracked as a follow-up to Phase 2.4).
+  -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAuditMode>direct</NuGetAuditMode>
+  </PropertyGroup>
+</Project>
