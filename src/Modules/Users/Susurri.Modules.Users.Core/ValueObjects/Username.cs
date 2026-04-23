@@ -4,9 +4,12 @@ namespace Susurri.Modules.Users.Core.ValueObjects;
 
 public sealed record Username
 {
-    public string Value { get; }
-    
-    private Username(){}
+    public string Value { get; } = string.Empty;
+
+    // Parameterless ctor exists for EF Core / serializer materialization;
+    // they bypass validation and set Value via reflection. Default-init the
+    // backing field so the nullable analysis is satisfied.
+    private Username() { }
     
     public Username(string value)
     {

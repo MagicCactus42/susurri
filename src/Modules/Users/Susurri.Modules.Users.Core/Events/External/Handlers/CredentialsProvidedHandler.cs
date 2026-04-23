@@ -18,16 +18,16 @@ public sealed class CredentialsProvidedHandler : IEventHandler<CredentialsProvid
 
     public async Task HandleAsync(CredentialsProvided @event)
     {
-        var targetKey = await _userRepository.GetKeyByUsernameAsync(@event.Username);
+        var targetKey = await _userRepository.GetKeyByUsernameAsync(@event.Username).ConfigureAwait(false);
 
         if (targetKey is null)
         {
-            await _messageBroker.PublishAsync(new SignedUp(@event.PublicKey, @event.Username));
+            await _messageBroker.PublishAsync(new SignedUp(@event.PublicKey, @event.Username)).ConfigureAwait(false);
         }
 
         if (@event.PublicKey.Equals(targetKey))
         {
-            await _messageBroker.PublishAsync(new LoggedIn(@event.Username, @event.PublicKey));
+            await _messageBroker.PublishAsync(new LoggedIn(@event.Username, @event.PublicKey)).ConfigureAwait(false);
         }
     }
 }

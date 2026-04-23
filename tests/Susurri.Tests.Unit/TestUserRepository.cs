@@ -7,13 +7,13 @@ internal class TestUserRepository : IUserRepository
 {
     private readonly List<User> _users = new();
 
-    public Task<User> GetByIdAsync(Guid id)
+    public Task<User?> GetByIdAsync(Guid id)
     {
         var user = _users.SingleOrDefault(x => x.UserId.Value == id);
         return Task.FromResult(user);
     }
 
-    public Task<byte[]> GetKeyByUsernameAsync(string username)
+    public Task<byte[]?> GetKeyByUsernameAsync(string username)
     {
         var key = _users
             .FirstOrDefault(x => x.Username == username)?

@@ -30,7 +30,7 @@ public sealed class SignedUpHandler : IEventHandler<SignedUp>
             LastSeenAt = _clock.CurrentTime()
         };
         
-        await _userRepository.AddAsync(user);
+        await _userRepository.AddAsync(user).ConfigureAwait(false);
         _logger.LogInformation($"User {user.Username} created with userId {user.UserId}");
     }
 }

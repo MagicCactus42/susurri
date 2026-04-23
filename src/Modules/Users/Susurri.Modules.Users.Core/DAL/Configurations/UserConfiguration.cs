@@ -17,5 +17,17 @@ internal class UserConfiguration : IEntityTypeConfiguration<User>
             .IsRequired();
         builder.Property(x => x.CreatedAt);
         builder.Property(x => x.LastSeenAt);
+
+        // Integrity:
+        //  - Username uniqueness is enforced at the DB layer so duplicate
+        //    registrations fail loudly instead of silently corrupting lookups.
+        //  - LastSeenAt is indexed for cheap stale-user sweeps without scanning
+        //    the whole table.
+        builder.HasIndex(x => x.Username)
+            .IsUnique()
+            .HasDatabaseName("IX_Users_Username");
+
+        builder.HasIndex(x => x.LastSeenAt)
+            .HasDatabaseName("IX_Users_LastSeenAt");
     }
 }
