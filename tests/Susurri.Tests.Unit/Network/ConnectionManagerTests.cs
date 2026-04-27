@@ -278,6 +278,7 @@ public class ConnectionTypeTests
     public void ConnectionType_HasExpectedValues()
     {
         Assert.Equal(0, (int)ConnectionType.Direct);
-        Assert.Equal(1, (int)ConnectionType.Relayed);
+        Assert.Equal(1, (int)ConnectionType.HolePunched);
+        Assert.Equal(2, (int)ConnectionType.Relayed);
     }
 }
