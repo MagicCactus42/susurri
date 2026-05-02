@@ -1,0 +1,5 @@
+{
+  "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
+  "_comment": "Cap parallel test classes at 4. Several tests (BackgroundTaskRunner timing assertions, CsCheck-driven property tests with 100+ iterations) are sensitive to threadpool starvation when xUnit fires every class in parallel. 4 lets us still parallelize across test classes for speed while leaving threadpool slots available for the test bodies' own Task.Run / async work.",
+  "maxParallelThreads": 4
+}
