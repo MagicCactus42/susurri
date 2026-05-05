@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <IsPackable>false</IsPackable>
+        <AssemblyName>susurri-fuzz</AssemblyName>
+        <RootNamespace>Susurri.Tests.Fuzz</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="SharpFuzz" Version="2.2.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\Modules\DHT\Susurri.Modules.DHT.Core\Susurri.Modules.DHT.Core.csproj" />
+    </ItemGroup>
+
+</Project>
