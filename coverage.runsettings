@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <!--
+            Coverage scope: only the production module assemblies. Tests, fuzz
+            harness, generated EF migrations, and DI extension shims are
+            excluded so the threshold reflects actual product code.
+          -->
+          <Format>cobertura</Format>
+
+          <!-- Comma-separated list of [Assembly]Class filters. Wildcards OK. -->
+          <Include>
+            [Susurri.Modules.*]*,[Susurri.Shared.*]*
+          </Include>
+
+          <Exclude>
+            [Susurri.Tests.*]*,
+            [susurri-fuzz]*,
+            [*]*.Migrations.*,
+            [*]*Extensions,
+            [*]*UsersDbContextFactory
+          </Exclude>
+
+          <!-- Skip auto-generated files by attribute or path. -->
+          <ExcludeByAttribute>
+            Obsolete,GeneratedCode,CompilerGenerated,ExcludeFromCodeCoverage
+          </ExcludeByAttribute>
+
+          <ExcludeByFile>
+            **/Migrations/**/*.cs,
+            **/*.Designer.cs,
+            **/obj/**,
+            **/bin/**
+          </ExcludeByFile>
+
+          <SingleHit>false</SingleHit>
+          <UseSourceLink>false</UseSourceLink>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          <SkipAutoProps>true</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
