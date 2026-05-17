@@ -15,7 +15,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
     <PackageReference Include="Avalonia.ReactiveUI" Version="11.2.3" />
     <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3" Condition="'$(Configuration)' == 'Debug'" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.16" />
   </ItemGroup>
 
   <ItemGroup>

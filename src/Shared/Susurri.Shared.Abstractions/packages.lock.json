@@ -4,11 +4,11 @@
     "net10.0": {
       "Microsoft.Extensions.DependencyInjection": {
         "type": "Direct",
-        "requested": "[9.0.4, )",
-        "resolved": "9.0.4",
-        "contentHash": "f2MTUaS2EQ3lX4325ytPAISZqgBfXmY0WvgD80ji6Z20AoDNiCESxsqo6mFRwHJD/jfVKRw9FsW6+86gNre3ug==",
+        "requested": "[9.0.16, )",
+        "resolved": "9.0.16",
+        "contentHash": "ehl4zyK3uUAPX+sQWIzlcavpfWJVb5vl468tI71x5BRzE1Q/1co9OLYmTdEQtVS8qd0GO7RQK/nz6lZha1+Stw==",
         "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.4"
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.16"
         }
       },
       "NSec.Cryptography": {
@@ -27,8 +27,8 @@
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
-        "resolved": "9.0.4",
-        "contentHash": "UI0TQPVkS78bFdjkTodmkH0Fe8lXv9LnhGFKgKrsgUJ5a5FVdFRcgjIkBVLbGgdRhxWirxH/8IXUtEyYJx6GQg=="
+        "resolved": "9.0.16",
+        "contentHash": "nluyqL58OHcU2M1qFx2QXBa0miA4yUfQBX2J98hHKRrsigtVEJzQYPMDhwDeBaX4qyjI3f3rX+uOsP5lAwPJpg=="
       }
     }
   }
