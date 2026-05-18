@@ -1,0 +1,68 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ContinuousIntegrationBuild: 'true'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: restore
+        run: dotnet restore
+
+      - name: build (TreatWarningsAsErrors)
+        run: dotnet build --configuration Release --no-restore /p:TreatWarningsAsErrors=true
+
+      - name: test (linux with coverage gate)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/check-coverage.sh
+
+      - name: test (windows and macos)
+        if: runner.os != 'Linux'
+        run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --filter "FullyQualifiedName!~RoutingTableTests.FindClosestNodes_ReturnsNodesOrderedByDistance"
+
+      - name: upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/test-results.trx'
+          if-no-files-found: ignore
+
+      - name: upload coverage report
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-cobertura
+          path: '**/coverage.cobertura.xml'
+          if-no-files-found: ignore

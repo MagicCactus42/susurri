@@ -50,9 +50,10 @@ fi
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 
-DOTNET_ROOT="${DOTNET_ROOT:-/home/magiccactus42/.dotnet}"
-export DOTNET_ROOT
-export PATH="$DOTNET_ROOT:$PATH"
+if [ -z "${DOTNET_ROOT:-}" ] && [ -d "$HOME/.dotnet" ]; then
+    export DOTNET_ROOT="$HOME/.dotnet"
+    export PATH="$DOTNET_ROOT:$PATH"
+fi
 
 declare -A OBSERVED=()
 
