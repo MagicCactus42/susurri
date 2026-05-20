@@ -239,9 +239,12 @@ attempted. They are documented in
   - 4.2 OpenTelemetry metrics (counters + 1 histogram + conditional OTLP exporter) **complete.** Observable gauges and outbound-DHT counter deferred to a later sub-phase.
   - 4.3 `/health` + `/ready` endpoints via HttpListener **complete.** Bootstrap-mode only; bind 127.0.0.1:7071 by default; readiness check covers NodeServer presence. Routing-table peer check deferred until `KademliaDhtNode` is the bootstrap node implementation (currently bootstrap uses `NodeServer` line-protocol).
   - 4.4 `IFatalErrorHandler` + redacted local crash dumps + optional OTLP-style POST **complete (code).** Wired to `AppDomain.UnhandledException` + `TaskScheduler.UnobservedTaskException`. Writes JSON to `~/.config/Susurri/crashes/` by default. Remote POST off unless `CrashReporting:Endpoint` set. Build/test verification deferred to a user-driven session (constraint: no Bash in autonomous loop).
-- **Phase 5** — CI/CD: GitHub Actions matrix builds, Dependabot, signed
-  releases with SBOM, cross-platform installers (deb / Flatpak / AppImage /
-  WiX MSI / macOS pkg).
+- **Phase 5** — CI/CD:
+  - 5.1 GitHub Actions matrix build + security scans + nightly fuzz **complete.** `build.yml` (ubuntu/windows/macos × net10.0, strict warnings, coverage gate on linux), `security.yml` (CodeQL csharp, `dotnet list package --vulnerable`, `dotnet format` informational), `fuzz.yml` (nightly 5-min SharpFuzz smoke). First real run will land when these are pushed and a PR opens.
+  - 5.2 Dependabot + pinned NuGet sources + lock-file mode **complete (config).** `.github/dependabot.yml` opens weekly grouped PRs for nuget + github-actions, ignoring semver-major bumps. `nuget.config` clears inherited sources and pins everything to nuget.org. `Directory.Build.props` sets `RestorePackagesWithLockFile=true` always and `RestoreLockedMode=true` when `$(ContinuousIntegrationBuild)` is set (CI workflows export it). **Action required:** before pushing, run `dotnet restore` locally to generate `packages.lock.json` for every csproj, then commit them — first CI run will otherwise fail with a "lock file is missing" error.
+  - 5.3 Versioning + signed releases with SBOM — pending (signing requires GPG/cosign keys the user must provision; loop will stop and surface the blocker).
+  - 5.4 Reproducible builds (`<DeterministicSourcePaths>`, attestations) — pending.
+  - 5.5 Cross-platform installers (deb / Flatpak / AppImage / WiX MSI / macOS pkg) — pending; macOS pkg needs Apple Developer ID.
 - **Phase 6** — Operations: bootstrap-node IaC, systemd units, multi-environment
   configs (Dev/Staging/Production), DB migration runner, secret-management
   documentation.
