@@ -16,9 +16,9 @@
       },
       "CsCheck": {
         "type": "Direct",
-        "requested": "[4.1.0, )",
-        "resolved": "4.1.0",
-        "contentHash": "iKKp6gJHzFBuxT9qR/eC0o+sgue2b7XepEl3uRRsZBuvlfg1Ua2HC9rY5QldYErzJfMxDZ+7CGYtQ6xRzZeVXg=="
+        "requested": "[4.7.0, )",
+        "resolved": "4.7.0",
+        "contentHash": "j1ddNwZJHtuXJo0haeDtEX/j/iDJYLlZdIvaEmb7ftxTN9p4e5/jn6hYGXH/Em6RFfDRGWaNQ17LOMR3MhYWwA=="
       },
       "Microsoft.Extensions.DependencyInjection": {
         "type": "Direct",
