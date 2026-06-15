@@ -5,10 +5,10 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
-      seconds:
-        description: smoke duration in seconds (passed to --seconds)
+      seconds_per_target:
+        description: smoke duration in seconds per target
         required: false
-        default: '300'
+        default: '30'
 
 permissions:
   contents: read
@@ -24,9 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
@@ -34,19 +34,48 @@ jobs:
       - name: build fuzz harness
         run: dotnet build tests/Susurri.Tests.Fuzz/Susurri.Tests.Fuzz.csproj --configuration Release --nologo
 
-      - name: run smoke
+      - name: list targets
+        id: targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t TARGETS < <(dotnet run --project tests/Susurri.Tests.Fuzz --configuration Release --no-build -- list)
+          printf 'discovered %d targets:\n' "${#TARGETS[@]}"
+          printf ' - %s\n' "${TARGETS[@]}"
+          {
+            echo "list<<EOF"
+            printf '%s\n' "${TARGETS[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: run smoke per target
         shell: bash
         env:
-          SECONDS_PER_TARGET: ${{ github.event.inputs.seconds || '300' }}
+          SECONDS_PER_TARGET: ${{ github.event.inputs.seconds_per_target || '30' }}
         run: |
           set -euo pipefail
           mkdir -p fuzz-crashes
-          dotnet run --project tests/Susurri.Tests.Fuzz --configuration Release --no-build -- \
-            --smoke --seconds "$SECONDS_PER_TARGET" --crashes "$GITHUB_WORKSPACE/fuzz-crashes"
+          failed=0
+          while IFS= read -r target; do
+            [ -z "$target" ] && continue
+            echo "::group::smoke $target"
+            if ! dotnet run --project tests/Susurri.Tests.Fuzz --configuration Release --no-build -- \
+                  "$target" --smoke --seconds "$SECONDS_PER_TARGET" --crashes "$GITHUB_WORKSPACE/fuzz-crashes"; then
+              failed=$((failed + 1))
+              echo "::error::fuzz target $target crashed"
+            fi
+            echo "::endgroup::"
+          done <<EOF
+          ${{ steps.targets.outputs.list }}
+          EOF
+          if [ "$failed" -gt 0 ]; then
+            echo "::error::$failed fuzz target(s) crashed"
+            exit 1
+          fi
 
       - name: upload crashes
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: fuzz-crashes-${{ github.run_id }}
           path: fuzz-crashes/

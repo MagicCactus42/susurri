@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
@@ -50,9 +50,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
@@ -71,18 +71,74 @@ jobs:
             exit 1
           fi
 
-  format:
-    name: dotnet format
+  osv:
+    name: osv-scanner (lockfile + transitive)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - name: osv-scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v2.0.0
+        with:
+          scan-args: |-
+            --recursive
+            --format=sarif
+            --output=osv.sarif
+            .
+        continue-on-error: true
+      - name: upload sarif
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
 
-      - uses: actions/setup-dotnet@v4
+  secrets:
+    name: trufflehog (verified secrets only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: trufflehog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified --fail
+
+  format:
+    name: dotnet format (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
 
       - name: verify formatting
-        run: dotnet format --verify-no-changes
+        shell: bash
+        run: |
+          set +e
+          dotnet format --verify-no-changes --report format-report.json 2>&1 | tee format.log
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::warning::dotnet format would change $(grep -c WHITESPACE format.log || echo 0) lines — informational only"
+          fi
+          exit 0
+
+      - name: upload format report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: format-report
+          path: |
+            format.log
+            format-report.json
+          if-no-files-found: ignore
