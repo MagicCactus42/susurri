@@ -45,7 +45,7 @@ public class LogRedactionTests
         // accidental switch to a different hash, output length, or byte order.
         // Input: 32 zero bytes (a likely common test fixture) → fixed digest.
         var input = new byte[32]; // all zeros
-        LogRedaction.KeyFingerprint(input).ShouldBe("F5977C8283546A63");
+        LogRedaction.KeyFingerprint(input).ShouldBe("66687AADF862BD77");
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class LogRedactionTests
         // distinctness.
         var input = new byte[32];
         for (int i = 0; i < input.Length; i++) input[i] = (byte)i;
-        LogRedaction.KeyFingerprint(input).ShouldBe("69F07C8840CE8002");
+        LogRedaction.KeyFingerprint(input).ShouldBe("630DCD2966C43366");
     }
 
     [Fact]

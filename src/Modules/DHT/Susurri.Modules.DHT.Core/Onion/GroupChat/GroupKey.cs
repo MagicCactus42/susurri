@@ -151,6 +151,8 @@ public sealed class GroupKey
 
         var groupId = new Guid(reader.ReadBytes(16));
         var keyLen = reader.ReadInt32();
+        if (keyLen < 0 || keyLen > SecurityLimits.MaxValueSize)
+            throw new InvalidDataException($"GroupKey symmetric key length {keyLen} out of range");
         var symmetricKey = reader.ReadBytes(keyLen);
         var createdAt = reader.ReadInt64();
         var rotatedAt = reader.ReadInt64();
@@ -199,10 +201,16 @@ public sealed class WrappedGroupKey
 
         var groupId = new Guid(reader.ReadBytes(16));
         var pubKeyLen = reader.ReadByte();
+        if (pubKeyLen != SecurityLimits.PublicKeySize)
+            throw new InvalidDataException($"WrappedGroupKey ephemeral pubkey length {pubKeyLen} invalid");
         var ephemeralPublicKey = reader.ReadBytes(pubKeyLen);
         var nonceLen = reader.ReadByte();
+        if (nonceLen != 12)
+            throw new InvalidDataException($"WrappedGroupKey nonce length {nonceLen} invalid");
         var nonce = reader.ReadBytes(nonceLen);
         var encKeyLen = reader.ReadInt32();
+        if (encKeyLen < 0 || encKeyLen > SecurityLimits.MaxValueSize)
+            throw new InvalidDataException($"WrappedGroupKey encrypted-key length {encKeyLen} out of range");
         var encryptedKey = reader.ReadBytes(encKeyLen);
         var version = reader.ReadInt32();
 
