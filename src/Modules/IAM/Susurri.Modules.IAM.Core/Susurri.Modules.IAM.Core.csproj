@@ -6,9 +6,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="dotnetstandard-bip39" Version="1.0.2" />
-      <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
-      <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
+      <PackageReference Include="dotnetstandard-bip39" />
+      <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+      <PackageReference Include="NSec.Cryptography" />
     </ItemGroup>
 
     <ItemGroup>

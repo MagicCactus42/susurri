@@ -8,16 +8,16 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="dotnetstandard-bip39" Version="1.0.2" />
-      <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.4" />
-      <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.4" />
-      <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" Version="9.0.4" />
-      <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.4">
+      <PackageReference Include="dotnetstandard-bip39" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
         <PrivateAssets>all</PrivateAssets>
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       </PackageReference>
-      <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
-      <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
+      <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+      <PackageReference Include="NSec.Cryptography" />
     </ItemGroup>
 
     <ItemGroup>

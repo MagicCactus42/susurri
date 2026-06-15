@@ -24,25 +24,18 @@
     </ItemGroup>
 
     <ItemGroup>
-        <!--
-            CLI entry-point uses the .NET 10 Microsoft.Extensions.* family
-            so that OpenTelemetry 1.15.3 (which transitively requires
-            10.0.0) resolves without downgrade errors. Other module
-            projects continue on 9.0.4 — only the entry point needs to
-            satisfy the transitive constraint.
-        -->
-        <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.0" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="10.0.0" />
-        <PackageReference Include="OpenTelemetry" Version="1.15.3" />
-        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
-        <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
-        <PackageReference Include="Serilog" Version="4.2.0" />
-        <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.0" />
-        <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
-        <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Configuration" />
+        <PackageReference Include="OpenTelemetry" />
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+        <PackageReference Include="Serilog" />
+        <PackageReference Include="Serilog.Extensions.Logging" />
+        <PackageReference Include="Serilog.Formatting.Compact" />
+        <PackageReference Include="Serilog.Sinks.Console" />
     </ItemGroup>
 
     <ItemGroup>
