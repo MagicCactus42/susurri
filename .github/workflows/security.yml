@@ -33,7 +33,7 @@ jobs:
           dotnet-quality: preview
 
       - name: init codeql
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: csharp
 
@@ -41,7 +41,7 @@ jobs:
         run: dotnet build --configuration Release /p:TreatWarningsAsErrors=true
 
       - name: analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: '/language:csharp'
 
@@ -88,7 +88,7 @@ jobs:
         continue-on-error: true
       - name: upload sarif
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: osv.sarif
           category: osv-scanner
