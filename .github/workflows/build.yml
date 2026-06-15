@@ -45,6 +45,8 @@ jobs:
       - name: test (linux with coverage gate)
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          CONFIGURATION: Release
         run: bash scripts/check-coverage.sh
 
       - name: test (windows and macos)

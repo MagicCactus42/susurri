@@ -63,6 +63,7 @@ run_project() {
     mkdir -p "$subdir"
     echo "::: $proj"
     timeout 600 dotnet test "tests/$proj/$proj.csproj" \
+        --configuration "${CONFIGURATION:-Debug}" \
         --no-build --nologo --logger "console;verbosity=quiet" \
         --filter "FullyQualifiedName!~RoutingTableTests.FindClosestNodes_ReturnsNodesOrderedByDistance" \
         --collect:"XPlat Code Coverage" \
