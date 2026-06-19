@@ -173,7 +173,7 @@ internal static class MsgGen
             });
 
     public static readonly Gen<OnionLayer> OnionLayerGen =
-        Gen.Select(PublicKey, Gen.Byte.Array[12], BytesUpTo(8192),
+        Gen.Select(PublicKey, Gen.Byte.Array[12], Gen.Int[16, 8192].SelectMany(n => Gen.Byte.Array[n]),
             (pub, nonce, ct) => new OnionLayer
             {
                 EphemeralPublicKey = pub,

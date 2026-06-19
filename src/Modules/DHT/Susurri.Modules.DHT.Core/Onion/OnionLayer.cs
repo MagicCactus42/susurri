@@ -1,7 +1,19 @@
+using Susurri.Shared.Abstractions.Security;
+
 namespace Susurri.Modules.DHT.Core.Onion;
+
+public enum OnionWireKind : byte
+{
+    Layer = 0x01,
+    ReplyChain = 0x02
+}
 
 public sealed class OnionLayer
 {
+    private const int PublicKeySize = 32;
+    private const int MinNonceSize = 12;
+    private const int MaxNonceSize = 24;
+
     public byte[] EphemeralPublicKey { get; init; } = Array.Empty<byte>();
     public byte[] Nonce { get; init; } = Array.Empty<byte>();
     public byte[] Ciphertext { get; init; } = Array.Empty<byte>();
@@ -27,13 +39,19 @@ public sealed class OnionLayer
         using var reader = new BinaryReader(ms);
 
         var pubKeyLen = reader.ReadByte();
-        var ephemeralPublicKey = reader.ReadBytes(pubKeyLen);
+        if (pubKeyLen != PublicKeySize)
+            throw new InvalidDataException($"Invalid ephemeral public key length: {pubKeyLen}");
+        var ephemeralPublicKey = ReadExactly(reader, pubKeyLen);
 
         var nonceLen = reader.ReadByte();
-        var nonce = reader.ReadBytes(nonceLen);
+        if (nonceLen < MinNonceSize || nonceLen > MaxNonceSize)
+            throw new InvalidDataException($"Invalid nonce length: {nonceLen}");
+        var nonce = ReadExactly(reader, nonceLen);
 
         var ciphertextLen = reader.ReadInt32();
-        var ciphertext = reader.ReadBytes(ciphertextLen);
+        if (ciphertextLen <= 0 || ciphertextLen > SecurityLimits.MaxMessageSize)
+            throw new InvalidDataException($"Invalid ciphertext length: {ciphertextLen}");
+        var ciphertext = ReadExactly(reader, ciphertextLen);
 
         return new OnionLayer
         {
@@ -41,6 +59,14 @@ public sealed class OnionLayer
             Nonce = nonce,
             Ciphertext = ciphertext
         };
+    }
+
+    internal static byte[] ReadExactly(BinaryReader reader, int length)
+    {
+        var bytes = reader.ReadBytes(length);
+        if (bytes.Length != length)
+            throw new InvalidDataException($"Truncated data: expected {length} bytes, got {bytes.Length}");
+        return bytes;
     }
 }
 
@@ -85,7 +111,10 @@ public sealed class OnionLayerContent
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);
 
-        var type = (OnionLayerType)reader.ReadByte();
+        var typeByte = reader.ReadByte();
+        if (!Enum.IsDefined(typeof(OnionLayerType), typeByte))
+            throw new InvalidDataException($"Unknown onion layer type: {typeByte}");
+        var type = (OnionLayerType)typeByte;
 
         string? nextHopAddress = null;
         int nextHopPort = 0;
@@ -93,21 +122,27 @@ public sealed class OnionLayerContent
 
         if (type == OnionLayerType.Relay)
         {
-            nextHopAddress = reader.ReadString();
+            nextHopAddress = SafeBinaryReader.ReadStringWithLimit(reader, SecurityLimits.MaxIpAddressLength);
             nextHopPort = reader.ReadUInt16();
         }
 
         if (type == OnionLayerType.FinalHop)
         {
             var pubKeyLen = reader.ReadByte();
-            recipientPublicKey = reader.ReadBytes(pubKeyLen);
+            if (pubKeyLen > SecurityLimits.PublicKeySize)
+                throw new InvalidDataException($"Recipient public key too large: {pubKeyLen}");
+            recipientPublicKey = OnionLayer.ReadExactly(reader, pubKeyLen);
         }
 
         var replyTokenLen = reader.ReadInt32();
-        var replyToken = reader.ReadBytes(replyTokenLen);
+        if (replyTokenLen < 0 || replyTokenLen > SecurityLimits.MaxValueSize)
+            throw new InvalidDataException($"Invalid reply token length: {replyTokenLen}");
+        var replyToken = OnionLayer.ReadExactly(reader, replyTokenLen);
 
         var innerPayloadLen = reader.ReadInt32();
-        var innerPayload = reader.ReadBytes(innerPayloadLen);
+        if (innerPayloadLen < 0 || innerPayloadLen > SecurityLimits.MaxMessageSize)
+            throw new InvalidDataException($"Invalid inner payload length: {innerPayloadLen}");
+        var innerPayload = OnionLayer.ReadExactly(reader, innerPayloadLen);
 
         return new OnionLayerContent
         {
