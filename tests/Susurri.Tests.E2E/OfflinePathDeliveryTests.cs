@@ -61,7 +61,7 @@ public class OfflinePathDeliveryTests
         captured.All.IsEmpty.ShouldBeTrue();
     }
 
-    [Fact(Skip = "ProcessOfflineMessageAsync lacks Phase 1's timestamp + replay checks (only HandleChatDeliveryAsync has them) — see KNOWN-LIMITATIONS.md")]
+    [Fact]
     public async Task Stale_Timestamp_Rejected_On_Offline_Path()
     {
         await using var bed = await OnionTestbed.StartAsync(count: 3);
@@ -69,12 +69,15 @@ public class OfflinePathDeliveryTests
         var captured = new EventCapture<ChatMessage>();
         bed.Bob.OnMessageReceived += (msg, _) => captured.HandleAsync(msg);
 
+        // The offline path tolerates messages up to the storage TTL (8-day
+        // window) since offline delivery is legitimately delayed. A message
+        // older than that window must still be rejected.
         var stale = new ChatMessage
         {
             SenderPublicKey = bed.AliceKeys.EncryptionPublicKey,
             SenderSigningPublicKey = bed.AliceKeys.SigningPublicKey,
             Content = "old news",
-            Timestamp = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeSeconds()
+            Timestamp = DateTimeOffset.UtcNow.AddDays(-10).ToUnixTimeSeconds()
         };
         stale.Signature = SignatureAlgorithm.Ed25519.Sign(bed.AliceKeys.Signing, stale.GetSignableData());
 

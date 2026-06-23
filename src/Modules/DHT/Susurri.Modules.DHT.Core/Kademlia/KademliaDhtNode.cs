@@ -35,6 +35,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     private const int K = 20;
     private const int MaxMessageSize = 256 * 1024;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StoreAuthTimestampWindow = TimeSpan.FromMinutes(5);
 
     public KademliaId LocalId { get; }
@@ -43,12 +44,13 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     public Key? SigningKey { get; }
     public byte[] SigningPublicKey { get; }
     public IPEndPoint? LocalEndPoint { get; private set; }
+    public int LocalPort { get; private set; }
     public bool IsRunning => _listener != null && _cts != null && !_cts.IsCancellationRequested;
     public int KnownNodes => _routingTable.TotalNodes;
     public RoutingTable RoutingTable => _routingTable;
     public NatTraversalService? NatTraversal => _natTraversal;
 
-    public event Func<byte[], byte[], Task>? OnMessageReceived;
+    public event Func<byte[], byte[], IPEndPoint, Task>? OnMessageReceived;
 
     public KademliaDhtNode(Key encryptionKey, ILogger<KademliaDhtNode> logger, Key? signingKey = null, NatTraversalService? natTraversal = null)
     {
@@ -90,6 +92,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
         LocalEndPoint = (IPEndPoint)_listener.LocalEndpoint;
+        LocalPort = LocalEndPoint.Port;
 
         _logger.LogInformation("Kademlia DHT Node {NodeId} started on port {Port}",
             LocalId.ToString()[..16], port);
@@ -263,7 +266,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
                 }
             }
 
-            shortlist = shortlist.OrderBy(n => n.Id.DistanceTo(key).CompareTo(default)).Take(K).ToList();
+            shortlist = shortlist.OrderBy(n => n.Id.DistanceTo(key)).Take(K).ToList();
         }
 
         return null;
@@ -341,15 +344,25 @@ public sealed class KademliaDhtNode : IAsyncDisposable
                 return;
             }
 
-            var senderEndpoint = remoteEndpoint;
-            var senderNode = new KademliaNode(message.SenderId, message.SenderPublicKey, senderEndpoint);
-            _routingTable.TryAddNode(senderNode);
+            // Route replies back to the sender's advertised listening port, not
+            // the ephemeral TCP source port. SenderPort == 0 means the peer did
+            // not advertise a reachable port (e.g. a one-way onion relay hop);
+            // don't pollute the routing table with an unreachable entry.
+            var senderEndpoint = new IPEndPoint(remoteEndpoint.Address, remoteEndpoint.Port);
+            if (message.SenderPort > 0 && message.SenderPublicKey.Length > 0)
+            {
+                var advertisedEndpoint = new IPEndPoint(remoteEndpoint.Address, message.SenderPort);
+                senderEndpoint = advertisedEndpoint;
+                var senderNode = new KademliaNode(message.SenderId, message.SenderPublicKey, advertisedEndpoint);
+                _routingTable.TryAddNode(senderNode);
+            }
 
             var response = await DispatchAsync(message, senderEndpoint).ConfigureAwait(false);
 
             if (response != null)
             {
                 using var writer = new BinaryWriter(stream);
+                response.SenderPort = LocalPort;
                 var responseData = response.Serialize();
                 writer.Write(responseData.Length);
                 writer.Write(responseData);
@@ -382,7 +395,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             FindValueResponseMessage findValueResp => HandleResponse(findValueResp),
             StoreResponseMessage storeResp => HandleResponse(storeResp),
             OfflineMessagesResponseMessage offlineResp => HandleResponse(offlineResp),
-            OnionMessageWrapper onion => await HandleOnionMessage(onion).ConfigureAwait(false),
+            OnionMessageWrapper onion => await HandleOnionMessage(onion, sender).ConfigureAwait(false),
             _ => null
         };
     }
@@ -576,14 +589,55 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         return null;
     }
 
-    private async Task<KademliaMessage?> HandleOnionMessage(OnionMessageWrapper onion)
+    private async Task<KademliaMessage?> HandleOnionMessage(OnionMessageWrapper onion, IPEndPoint sender)
     {
         if (OnMessageReceived != null)
         {
-            await OnMessageReceived(onion.SenderPublicKey, onion.EncryptedPayload).ConfigureAwait(false);
+            await OnMessageReceived(onion.SenderPublicKey, onion.EncryptedPayload, sender).ConfigureAwait(false);
         }
 
         return null;
+    }
+
+    internal async Task SendOnionAsync(IPEndPoint endpoint, byte[] wirePayload)
+    {
+        var wrapper = new OnionMessageWrapper
+        {
+            SenderId = LocalId,
+            SenderPublicKey = EncryptionPublicKey,
+            EncryptedPayload = wirePayload
+        };
+
+        await SendOneWayAsync(endpoint, wrapper).ConfigureAwait(false);
+    }
+
+    private async Task SendOneWayAsync(IPEndPoint endpoint, KademliaMessage message)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            using var connectCts = new CancellationTokenSource(ConnectTimeout);
+            await client.ConnectAsync(endpoint.Address, endpoint.Port, connectCts.Token).ConfigureAwait(false);
+
+            using var stream = client.GetStream();
+            using var writer = new BinaryWriter(stream);
+
+            message.SenderPort = LocalPort;
+            var data = message.Serialize();
+            writer.Write(data.Length);
+            writer.Write(data);
+            writer.Flush();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "One-way send to {Endpoint} failed", endpoint);
+        }
+    }
+
+    public async Task<bool> PingEndpointAsync(IPEndPoint endpoint)
+    {
+        var pong = await PingAsync(endpoint).ConfigureAwait(false);
+        return pong != null;
     }
 
     private async Task<PongMessage?> PingAsync(IPEndPoint endpoint)
@@ -615,7 +669,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         {
             var toQuery = shortlist
                 .Where(n => !queried.Contains(n.Id))
-                .OrderBy(n => n.Id.DistanceTo(targetId).CompareTo(default))
+                .OrderBy(n => n.Id.DistanceTo(targetId))
                 .Take(Alpha)
                 .ToList();
 
@@ -659,7 +713,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             if (!improved && toQuery.All(n => queried.Contains(n.Id)))
                 break;
 
-            shortlist = shortlist.OrderBy(n => n.Id.DistanceTo(targetId).CompareTo(default)).Take(K).ToList();
+            shortlist = shortlist.OrderBy(n => n.Id.DistanceTo(targetId)).Take(K).ToList();
         }
 
         return shortlist;
@@ -746,21 +800,30 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         try
         {
             using var client = new TcpClient();
-            await client.ConnectAsync(endpoint.Address, endpoint.Port).ConfigureAwait(false);
+            using var connectCts = new CancellationTokenSource(ConnectTimeout);
+            await client.ConnectAsync(endpoint.Address, endpoint.Port, connectCts.Token).ConfigureAwait(false);
+
+            client.ReceiveTimeout = (int)RequestTimeout.TotalMilliseconds;
 
             using var stream = client.GetStream();
             using var writer = new BinaryWriter(stream);
 
+            request.SenderPort = LocalPort;
             var data = request.Serialize();
             writer.Write(data.Length);
             writer.Write(data);
+            writer.Flush();
 
             using var cts = new CancellationTokenSource(RequestTimeout);
             cts.Token.Register(() => tcs.TrySetCanceled());
 
             using var reader = new BinaryReader(stream);
             var length = reader.ReadInt32();
+            if (length <= 0 || length > MaxMessageSize)
+                throw new InvalidDataException($"Response length out of range: {length}");
             var responseData = reader.ReadBytes(length);
+            if (responseData.Length != length)
+                throw new EndOfStreamException("Truncated response");
 
             return KademliaMessage.Deserialize(responseData);
         }

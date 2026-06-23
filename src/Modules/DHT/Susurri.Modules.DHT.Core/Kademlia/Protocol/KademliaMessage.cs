@@ -10,6 +10,7 @@ public abstract class KademliaMessage
     public Guid MessageId { get; init; } = Guid.NewGuid();
     public KademliaId SenderId { get; init; }
     public byte[] SenderPublicKey { get; init; } = Array.Empty<byte>();
+    public int SenderPort { get; set; }
     public abstract MessageType Type { get; }
 
     public byte[] Serialize()
@@ -20,6 +21,7 @@ public abstract class KademliaMessage
         writer.Write((byte)Type);
         writer.Write(MessageId.ToByteArray());
         writer.Write(SenderId.Bytes);
+        writer.Write((ushort)SenderPort);
         writer.Write((byte)SenderPublicKey.Length);
         writer.Write(SenderPublicKey);
         SerializePayload(writer);
@@ -31,7 +33,7 @@ public abstract class KademliaMessage
 
     public static KademliaMessage Deserialize(byte[] data)
     {
-        if (data == null || data.Length < 50)
+        if (data == null || data.Length < 52)
             throw new InvalidDataException("Message data too short");
 
         using var ms = new MemoryStream(data);
@@ -40,6 +42,7 @@ public abstract class KademliaMessage
         var type = (MessageType)reader.ReadByte();
         var messageId = new Guid(reader.ReadBytes(16));
         var senderId = KademliaId.FromBytes(reader.ReadBytes(32));
+        var senderPort = reader.ReadUInt16();
         var pubKeyLen = reader.ReadByte();
 
         if (pubKeyLen > PublicKeySize)
@@ -47,7 +50,7 @@ public abstract class KademliaMessage
 
         var senderPublicKey = reader.ReadBytes(pubKeyLen);
 
-        return type switch
+        KademliaMessage message = type switch
         {
             MessageType.Ping => PingMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             MessageType.Pong => PongMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
@@ -65,6 +68,9 @@ public abstract class KademliaMessage
             MessageType.HolePunchResponse => HolePunchResponseMessage.DeserializePayload(reader, messageId, senderId, senderPublicKey),
             _ => throw new InvalidDataException($"Unknown message type: {type}")
         };
+
+        message.SenderPort = senderPort;
+        return message;
     }
 
     protected static byte[] ReadBytesWithLimit(BinaryReader reader, int maxLength)

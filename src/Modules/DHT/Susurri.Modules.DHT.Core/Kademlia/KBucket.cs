@@ -102,7 +102,7 @@ public sealed class KBucket
         lock (_lock)
         {
             return _nodes
-                .OrderBy(n => n.Id.DistanceTo(target).CompareTo(default))
+                .OrderBy(n => n.Id.DistanceTo(target))
                 .Take(count)
                 .ToList();
         }

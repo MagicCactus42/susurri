@@ -20,24 +20,20 @@ public sealed class OnionBuilder
         _senderPublicKey = senderEncryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
     }
 
-    /// <summary>
-    /// Builds an onion packet carrying a raw byte payload (e.g. file transfer messages).
-    /// The payload is padded and wrapped in onion layers identical to chat messages.
-    /// </summary>
-    public OnionPacket BuildRaw(byte[] rawPayload, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path)
+    public OnionPacket BuildRaw(byte[] rawPayload, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path, System.Net.IPEndPoint? senderEndpoint = null)
     {
         if (path.Count < 1)
             throw new ArgumentException("Path must have at least one relay node", nameof(path));
 
         var paddedMessage = MessagePadding.Pad(rawPayload);
-        var replyTokens = GenerateReplyTokens(path);
+        var (replyTokens, senderToken) = GenerateReplyTokens(path, senderEndpoint);
 
         var lastHopEndpoint = path[path.Count - 1].EndPoint;
-        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, lastHopEndpoint);
+        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, senderToken, lastHopEndpoint);
         return WrapOnionLayers(recipientLayer, recipientPublicKey, path, replyTokens);
     }
 
-    public OnionPacket Build(ChatMessage message, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path)
+    public OnionPacket Build(ChatMessage message, byte[] recipientPublicKey, IReadOnlyList<KademliaNode> path, System.Net.IPEndPoint? senderEndpoint = null)
     {
         if (path.Count < 1)
             throw new ArgumentException("Path must have at least one relay node", nameof(path));
@@ -47,10 +43,10 @@ public sealed class OnionBuilder
 
         var messageBytes = message.Serialize();
         var paddedMessage = MessagePadding.Pad(messageBytes);
-        var replyTokens = GenerateReplyTokens(path);
+        var (replyTokens, senderToken) = GenerateReplyTokens(path, senderEndpoint);
 
         var lastHopEndpoint = path[path.Count - 1].EndPoint;
-        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, lastHopEndpoint);
+        var recipientLayer = BuildRecipientLayer(paddedMessage, recipientPublicKey, replyTokens, senderToken, lastHopEndpoint);
         return WrapOnionLayers(recipientLayer, recipientPublicKey, path, replyTokens);
     }
 
@@ -102,12 +98,15 @@ public sealed class OnionBuilder
         };
     }
 
-    private byte[] BuildRecipientLayer(byte[] message, byte[] recipientPublicKey, IReadOnlyList<ReplyToken> replyTokens, System.Net.IPEndPoint firstReturnHop)
+    private byte[] BuildRecipientLayer(byte[] message, byte[] recipientPublicKey, IReadOnlyList<ReplyToken> replyTokens, byte[] senderToken, System.Net.IPEndPoint firstReturnHop)
     {
+        var tokens = new List<byte[]> { senderToken };
+        tokens.AddRange(replyTokens.Select(t => t.EncryptedToken));
+
         var replyPath = new ReplyPath
         {
             SenderPublicKey = _senderPublicKey,
-            Tokens = replyTokens.Select(t => t.EncryptedToken).ToList(),
+            Tokens = tokens,
             FirstHopAddress = firstReturnHop.Address.ToString(),
             FirstHopPort = firstReturnHop.Port
         };
@@ -121,38 +120,44 @@ public sealed class OnionBuilder
         return EncryptLayer(recipientPayload.Serialize(), recipientPublicKey);
     }
 
-    private List<ReplyToken> GenerateReplyTokens(IReadOnlyList<KademliaNode> path)
+    private (List<ReplyToken> RelayTokens, byte[] SenderToken) GenerateReplyTokens(IReadOnlyList<KademliaNode> path, System.Net.IPEndPoint? senderEndpoint)
     {
-        var tokens = new List<ReplyToken>();
-
         var senderMarkerNonce = new byte[32];
         RandomNumberGenerator.Fill(senderMarkerNonce);
 
+        var senderTokenContent = new ReplyTokenContent
+        {
+            PreviousHopAddress = string.Empty,
+            PreviousHopPort = 0,
+            SessionKey = GenerateSessionKey(),
+            SenderMarker = senderMarkerNonce
+        };
+        var senderToken = EncryptLayer(senderTokenContent.Serialize(), _senderPublicKey);
+
+        var tokens = new List<ReplyToken>();
         for (int i = 0; i < path.Count; i++)
         {
             var node = path[i];
 
-            ReplyTokenContent tokenContent;
+            string prevAddress;
+            int prevPort;
             if (i == 0)
             {
-                tokenContent = new ReplyTokenContent
-                {
-                    PreviousHopAddress = string.Empty,
-                    PreviousHopPort = 0,
-                    SessionKey = GenerateSessionKey(),
-                    SenderMarker = senderMarkerNonce
-                };
+                prevAddress = senderEndpoint?.Address.ToString() ?? string.Empty;
+                prevPort = senderEndpoint?.Port ?? 0;
             }
             else
             {
-                var prevNode = path[i - 1];
-                tokenContent = new ReplyTokenContent
-                {
-                    PreviousHopAddress = prevNode.EndPoint.Address.ToString(),
-                    PreviousHopPort = prevNode.EndPoint.Port,
-                    SessionKey = GenerateSessionKey()
-                };
+                prevAddress = path[i - 1].EndPoint.Address.ToString();
+                prevPort = path[i - 1].EndPoint.Port;
             }
+
+            var tokenContent = new ReplyTokenContent
+            {
+                PreviousHopAddress = prevAddress,
+                PreviousHopPort = prevPort,
+                SessionKey = GenerateSessionKey()
+            };
 
             var encryptedToken = EncryptLayer(tokenContent.Serialize(), node.EncryptionPublicKey);
 
@@ -160,12 +165,11 @@ public sealed class OnionBuilder
             {
                 NodePublicKey = node.EncryptionPublicKey,
                 EncryptedToken = encryptedToken,
-                SessionKey = tokenContent.SessionKey,
-                SenderMarkerNonce = i == 0 ? senderMarkerNonce : null
+                SessionKey = tokenContent.SessionKey
             });
         }
 
-        return tokens;
+        return (tokens, senderToken);
     }
 
     private byte[] EncryptLayer(byte[] plaintext, byte[] recipientPublicKey)
@@ -221,7 +225,6 @@ public sealed class ReplyToken
     public byte[] NodePublicKey { get; init; } = Array.Empty<byte>();
     public byte[] EncryptedToken { get; init; } = Array.Empty<byte>();
     public byte[] SessionKey { get; init; } = Array.Empty<byte>();
-    public byte[]? SenderMarkerNonce { get; init; }
 }
 
 public sealed class ReplyTokenContent

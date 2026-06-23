@@ -56,7 +56,7 @@ public sealed class RoutingTable
 
         // Sort by XOR distance to target
         return allNodes
-            .OrderBy(n => n.Id.DistanceTo(target).CompareTo(default))
+            .OrderBy(n => n.Id.DistanceTo(target))
             .Take(count)
             .ToList();
     }

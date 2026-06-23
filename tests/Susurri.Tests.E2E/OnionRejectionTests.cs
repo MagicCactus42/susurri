@@ -37,7 +37,7 @@ public class OnionRejectionTests
         captured.All.IsEmpty.ShouldBeTrue("tampered message must not be delivered");
     }
 
-    [Fact(Skip = "Replay test needs successful first delivery; blocked by relay-chain bug — see KNOWN-LIMITATIONS.md")]
+    [Fact]
     public async Task Replayed_Message_Is_Dropped_On_Second_Arrival()
     {
         await using var bed = await OnionTestbed.StartAsync(count: 5);
