@@ -1,6 +1,8 @@
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Susurri.Modules.DHT.Core.Node;
+using NSec.Cryptography;
+using Susurri.Modules.DHT.Core.Kademlia;
 
 namespace Susurri.CLI.Commands;
 
@@ -33,7 +35,7 @@ internal sealed class DhtCommand : ICommand
         {
             case "start":
             case "deploy":
-                await StartAsync(args.Skip(1).ToArray());
+                await StartAsync(args.Skip(1).ToArray()).ConfigureAwait(false);
                 break;
 
             case "stop":
@@ -69,38 +71,36 @@ internal sealed class DhtCommand : ICommand
         if (args.Length > 0 && int.TryParse(args[0], out var customPort))
             port = customPort;
 
+        var seeds = args.Skip(1).Select(ParseEndpoint).Where(e => e != null).Select(e => e!).ToList();
+
         ConsoleUi.PrintInfo($"Starting DHT node on port {port}...");
 
         try
         {
             var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
-            var logger = loggerFactory.CreateLogger<NodeServer>();
+            var logger = loggerFactory.CreateLogger<KademliaDhtNode>();
 
-            var node = new NodeServer(port, logger);
+            var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
+                new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+            var signingKey = Key.Create(SignatureAlgorithm.Ed25519,
+                new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+
+            var node = new KademliaDhtNode(encryptionKey, logger, signingKey);
             var cts = new CancellationTokenSource();
+
+            await node.StartAsync(port).ConfigureAwait(false);
             _session.SetDhtNode(node, cts);
 
-            _ = Task.Run(async () =>
+            if (seeds.Count > 0)
             {
-                try
-                {
-                    await node.StartAsync();
-                }
-                catch (OperationCanceledException)
-                {
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine();
-                    ConsoleUi.PrintError($"DHT node error: {ex.Message}");
-                }
-            });
-
-            await Task.Delay(500);
+                ConsoleUi.PrintInfo($"Bootstrapping against {seeds.Count} seed node(s)...");
+                await node.BootstrapAsync(seeds).ConfigureAwait(false);
+            }
 
             ConsoleUi.PrintSuccess("DHT node started.");
-            ConsoleUi.PrintInfo($"  Node ID: {node.NodeId}");
+            ConsoleUi.PrintInfo($"  Node ID: {node.LocalId.ToString()[..16]}");
             ConsoleUi.PrintInfo($"  Port:    {port}");
+            ConsoleUi.PrintInfo($"  Peers:   {node.KnownNodes}");
         }
         catch (Exception ex)
         {
@@ -133,18 +133,31 @@ internal sealed class DhtCommand : ICommand
         else
         {
             ConsoleUi.PrintInfo("DHT node: RUNNING");
-            ConsoleUi.PrintInfo($"  Node ID: {_session.DhtNode.NodeId}");
+            ConsoleUi.PrintInfo($"  Node ID: {_session.DhtNode.LocalId.ToString()[..16]}");
+            ConsoleUi.PrintInfo($"  Peers:   {_session.DhtNode.KnownNodes}");
         }
+    }
+
+    private static IPEndPoint? ParseEndpoint(string endpoint)
+    {
+        var parts = endpoint.Split(':');
+        if (parts.Length == 2 &&
+            IPAddress.TryParse(parts[0], out var ip) &&
+            int.TryParse(parts[1], out var port))
+        {
+            return new IPEndPoint(ip, port);
+        }
+        return null;
     }
 
     private static void PrintHelp()
     {
         ConsoleUi.PrintHeader("DHT Commands:");
         Console.WriteLine();
-        Console.WriteLine("  dht start [port]     - Start DHT node (default port: 7070)");
-        Console.WriteLine("  dht deploy [port]    - Alias for 'dht start'");
-        Console.WriteLine("  dht stop             - Stop DHT node");
-        Console.WriteLine("  dht status           - Show DHT node status");
-        Console.WriteLine("  dht help             - Show this help");
+        Console.WriteLine("  dht start [port] [seed-ip:port ...]  - Start a Kademlia DHT node (default port: 7070)");
+        Console.WriteLine("  dht deploy [port] [seeds...]         - Alias for 'dht start'");
+        Console.WriteLine("  dht stop                             - Stop DHT node");
+        Console.WriteLine("  dht status                           - Show DHT node status");
+        Console.WriteLine("  dht help                             - Show this help");
     }
 }

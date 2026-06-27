@@ -1,4 +1,4 @@
-using Susurri.Modules.DHT.Core.Node;
+using Susurri.Modules.DHT.Core.Kademlia;
 
 namespace Susurri.CLI;
 
@@ -11,7 +11,7 @@ internal sealed class SessionState : IAsyncDisposable
     public string? CurrentUser { get; private set; }
     public bool IsLoggedIn => CurrentUser != null;
 
-    public NodeServer? DhtNode { get; private set; }
+    public KademliaDhtNode? DhtNode { get; private set; }
     public CancellationTokenSource? DhtCts { get; private set; }
 
     public void SetLoggedIn(string username)
@@ -24,7 +24,7 @@ internal sealed class SessionState : IAsyncDisposable
         CurrentUser = null;
     }
 
-    public void SetDhtNode(NodeServer node, CancellationTokenSource cts)
+    public void SetDhtNode(KademliaDhtNode node, CancellationTokenSource cts)
     {
         DhtNode = node;
         DhtCts = cts;
@@ -41,10 +41,8 @@ internal sealed class SessionState : IAsyncDisposable
     {
         if (DhtNode != null)
         {
-            // Use the awaitable variant so in-flight DHT client handlers drain
-            // before the process exits.
-            await DhtNode.StopAsync().ConfigureAwait(false);
             DhtCts?.Cancel();
+            await DhtNode.DisposeAsync().ConfigureAwait(false);
             DhtCts?.Dispose();
             DhtNode = null;
             DhtCts = null;

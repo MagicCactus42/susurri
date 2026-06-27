@@ -1,5 +1,8 @@
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
-using Susurri.Modules.DHT.Core.Abstractions;
+using Microsoft.Extensions.Logging;
+using NSec.Cryptography;
+using Susurri.Modules.DHT.Core.Kademlia;
 
 namespace Susurri.CLI.Commands;
 
@@ -24,27 +27,34 @@ internal sealed class PingCommand : ICommand
             return true;
         }
 
-        if (!int.TryParse(args[1], out var port))
+        if (!int.TryParse(args[1], out var port) || port <= 0 || port > 65535)
         {
             ConsoleUi.PrintError("Invalid port number.");
             return true;
         }
 
-        var host = args[0];
-        ConsoleUi.PrintInfo($"Pinging {host}:{port}...");
+        if (!IPAddress.TryParse(args[0], out var address))
+        {
+            ConsoleUi.PrintError("Invalid host address (expected an IP address).");
+            return true;
+        }
+
+        var endpoint = new IPEndPoint(address, port);
+        ConsoleUi.PrintInfo($"Pinging {endpoint}...");
+
+        var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger<KademliaDhtNode>();
+
+        var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
+            new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+
+        await using var probe = new KademliaDhtNode(encryptionKey, logger);
 
         try
         {
-            var nodeClient = _services.GetService<INodeClient>();
-            if (nodeClient == null)
-            {
-                ConsoleUi.PrintError("Node client not available.");
-                return true;
-            }
-
-            var response = await nodeClient.SendMessage(host, port, "PING");
-            if (!string.IsNullOrEmpty(response))
-                ConsoleUi.PrintSuccess($"Response: {response}");
+            var alive = await probe.PingEndpointAsync(endpoint).ConfigureAwait(false);
+            if (alive)
+                ConsoleUi.PrintSuccess($"PONG from {endpoint}");
             else
                 ConsoleUi.PrintWarning("No response received.");
         }

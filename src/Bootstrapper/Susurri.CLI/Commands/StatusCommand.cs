@@ -31,7 +31,8 @@ internal sealed class StatusCommand : ICommand
         else
         {
             ConsoleUi.PrintInfo("DHT node: RUNNING");
-            ConsoleUi.PrintInfo($"  Node ID: {_session.DhtNode.NodeId}");
+            ConsoleUi.PrintInfo($"  Node ID: {_session.DhtNode.LocalId.ToString()[..16]}");
+            ConsoleUi.PrintInfo($"  Peers:   {_session.DhtNode.KnownNodes}");
         }
 
         return Task.FromResult(true);

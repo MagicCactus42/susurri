@@ -3,8 +3,9 @@ using Susurri.Shared.Abstractions.Health;
 namespace Susurri.CLI.Health;
 
 /// <summary>
-/// Readiness check: the bootstrap-mode NodeServer is started and accepting.
-/// Used in bootstrap mode only — interactive sessions don't expose health.
+/// Readiness check: the bootstrap-mode Kademlia DHT node is started and
+/// listening. Used in bootstrap mode only — interactive sessions don't
+/// expose health.
 /// </summary>
 internal sealed class NodeServerRunningCheck : IHealthCheck
 {
@@ -15,7 +16,7 @@ internal sealed class NodeServerRunningCheck : IHealthCheck
         _session = session;
     }
 
-    public string Name => "node-server";
+    public string Name => "dht-node";
 
     public Task<HealthCheckResult> CheckAsync(CancellationToken ct)
     {
@@ -23,6 +24,9 @@ internal sealed class NodeServerRunningCheck : IHealthCheck
         if (node is null)
             return Task.FromResult(HealthCheckResult.Unhealthy("DHT node not started"));
 
-        return Task.FromResult(HealthCheckResult.Healthy());
+        if (!node.IsRunning)
+            return Task.FromResult(HealthCheckResult.Unhealthy("DHT node not listening"));
+
+        return Task.FromResult(HealthCheckResult.Healthy($"listening, {node.KnownNodes} peer(s) known"));
     }
 }
