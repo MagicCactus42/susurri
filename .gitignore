@@ -55,3 +55,12 @@ nunit-*.xml
 
 # Claude
 .claude
+
+# Published build artifacts (never commit binaries)
+publish/
+publish-cli/
+publish-gui/
+
+# Local secrets (docker-compose, connection strings)
+.env
+!.env.example
