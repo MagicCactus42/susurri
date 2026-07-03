@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
@@ -79,13 +80,18 @@ internal sealed class DhtCommand : ICommand
         {
             var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
             var logger = loggerFactory.CreateLogger<KademliaDhtNode>();
+            var config = _services.GetRequiredService<IConfiguration>();
+
+            var udpEnabled = config.GetValue("DHT:Nat:Enabled", true);
+            var useStun = config.GetValue("DHT:Nat:UseStun", false);
 
             var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
             var signingKey = Key.Create(SignatureAlgorithm.Ed25519,
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
 
-            var node = new KademliaDhtNode(encryptionKey, logger, signingKey);
+            var node = new KademliaDhtNode(encryptionKey, logger, signingKey,
+                natTraversal: null, enableUdpTransport: udpEnabled, useStun: useStun);
             var cts = new CancellationTokenSource();
 
             await node.StartAsync(port).ConfigureAwait(false);
@@ -98,9 +104,10 @@ internal sealed class DhtCommand : ICommand
             }
 
             ConsoleUi.PrintSuccess("DHT node started.");
-            ConsoleUi.PrintInfo($"  Node ID: {node.LocalId.ToString()[..16]}");
-            ConsoleUi.PrintInfo($"  Port:    {port}");
-            ConsoleUi.PrintInfo($"  Peers:   {node.KnownNodes}");
+            ConsoleUi.PrintInfo($"  Node ID:   {node.LocalId.ToString()[..16]}");
+            ConsoleUi.PrintInfo($"  Port:      {port} (TCP + UDP)");
+            ConsoleUi.PrintInfo($"  Transport: {(udpEnabled ? "UDP + TCP fallback" : "TCP only")}{(useStun ? ", STUN" : "")}");
+            ConsoleUi.PrintInfo($"  Peers:     {node.KnownNodes}");
         }
         catch (Exception ex)
         {

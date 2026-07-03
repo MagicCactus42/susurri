@@ -108,13 +108,34 @@ your account. There is no password reset in a decentralized system.
 
 ---
 
+## Transport & NAT traversal
+
+Each node speaks its Kademlia + onion protocol over a **reliable UDP transport**
+(fragmentation, retransmission, reassembly, dedup on one shared socket) and keeps
+TCP as a fallback. UDP is preferred because it can traverse NAT via UDP
+hole-punching; TCP is used when a peer only exposes its TCP listener.
+
+Config (`appsettings.json` → `DHT:Nat`, or env `DHT__Nat__Enabled`):
+
+```json
+"Nat": { "Enabled": true, "UseStun": false }
+```
+
+- `Enabled` (default true): run the UDP transport + hole-punch path.
+- `UseStun` (default false): discover this node's public `ip:port` via public
+  STUN servers so it can be advertised for hole-punching. This reveals your IP
+  to third-party STUN servers, so it's **opt-in**. Turn it on for nodes behind
+  NAT that need to be reachable; a node on a public IP doesn't need it.
+
 ## Do I need a VPS?
 
-- **For a real, always-reachable network:** yes, run **1–2 bootstrap/relay nodes
-  on public IPs** (a cheap VPS each). They are entry points and onion relays, not
-  servers that see your messages. Nodes behind home NAT can reach public nodes
-  outbound; onion circuits are built from nodes that have public reachability.
+- **Full P2P — no server sees your traffic.** Messages travel through onion
+  circuits of random peers; offline messages are stored distributed in the DHT.
+- **You still need ≥1 bootstrap seed at a known address** (entry point only, like
+  BitTorrent/IPFS). For an always-on network, run **1–2 seeds on public IPs**
+  (a cheap VPS each) — they also serve as onion relays and hole-punch
+  rendezvous. With `UseStun` on, home nodes behind NAT can now become directly
+  reachable to each other via hole-punching, so the network no longer depends
+  solely on public relays.
 - **For local testing or friends who know each other's IPs:** no VPS needed —
-  any node with a reachable address can be the seed for the others.
-
-See the "Architecture" notes in the project docs for the full delivery path.
+  any node with a reachable address is the seed for the others.

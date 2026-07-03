@@ -25,6 +25,8 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     private readonly BackgroundTaskRunner _backgroundTasks;
     private readonly OfflineMessageService _offlineMessages;
     private readonly HolePunchCoordinator _holePunch;
+    private readonly UdpEndpoint? _udp;
+    private readonly bool _useStun;
     private bool _disposed;
 
     private TcpListener? _listener;
@@ -45,6 +47,8 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     public byte[] SigningPublicKey { get; }
     public IPEndPoint? LocalEndPoint { get; private set; }
     public int LocalPort { get; private set; }
+    public IPEndPoint? PublicUdpEndPoint { get; private set; }
+    public bool UdpEnabled => _udp != null;
     public bool IsRunning => _listener != null && _cts != null && !_cts.IsCancellationRequested;
     public int KnownNodes => _routingTable.TotalNodes;
     public RoutingTable RoutingTable => _routingTable;
@@ -52,7 +56,13 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
     public event Func<byte[], byte[], IPEndPoint, Task>? OnMessageReceived;
 
-    public KademliaDhtNode(Key encryptionKey, ILogger<KademliaDhtNode> logger, Key? signingKey = null, NatTraversalService? natTraversal = null)
+    public KademliaDhtNode(
+        Key encryptionKey,
+        ILogger<KademliaDhtNode> logger,
+        Key? signingKey = null,
+        NatTraversalService? natTraversal = null,
+        bool enableUdpTransport = false,
+        bool useStun = false)
     {
         EncryptionKey = encryptionKey;
         EncryptionPublicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
@@ -63,6 +73,8 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         _routingTable = new RoutingTable(LocalId, K);
         _storage = new DhtStorage();
         _natTraversal = natTraversal;
+        _useStun = useStun;
+        _udp = enableUdpTransport ? new UdpEndpoint(logger) : null;
         _backgroundTasks = new BackgroundTaskRunner(logger);
 
         _offlineMessages = new OfflineMessageService(
@@ -99,6 +111,26 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
         _listenTask = ListenAsync(_cts.Token);
 
+        if (_udp != null)
+        {
+            // Bind UDP to the *resolved* TCP port (not the original argument, which
+            // may be 0 for ephemeral) so a peer that knows our listening port can
+            // reach us on the same number over either transport.
+            _udp.Start(LocalPort);
+            _udp.OnMessage += HandleUdpMessageAsync;
+
+            if (_useStun)
+            {
+                var ct = _cts.Token;
+                _backgroundTasks.Run(async () =>
+                {
+                    PublicUdpEndPoint = await _udp.DiscoverPublicEndpointAsync(StunClient.DefaultStunServers, ct).ConfigureAwait(false);
+                    if (PublicUdpEndPoint != null)
+                        _logger.LogInformation("Public UDP endpoint discovered via STUN: {Endpoint}", PublicUdpEndPoint);
+                }, "STUN public endpoint discovery");
+            }
+        }
+
         if (_natTraversal != null)
         {
             var ct = _cts.Token;
@@ -110,12 +142,59 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
+    public Task<bool> HolePunchAsync(Guid punchId, IPEndPoint remoteEndpoint, CancellationToken ct = default)
+    {
+        if (_udp == null)
+            return Task.FromResult(false);
+        return _udp.HolePunchAsync(punchId, remoteEndpoint, ct);
+    }
+
+    private async Task HandleUdpMessageAsync(IPEndPoint sender, byte[] data)
+    {
+        using var activity = InboundActivity.Begin("dht.inbound.udp", sender);
+        try
+        {
+            if (!_rateLimiter.IsAllowed(sender))
+                return;
+
+            var message = KademliaMessage.Deserialize(data);
+
+            SusurriMetrics.DhtMessagesIn.Add(1, new KeyValuePair<string, object?>("type", message.GetType().Name));
+
+            if (!_replayCache.TryRecord(message.MessageId))
+            {
+                SusurriMetrics.ReplaysDropped.Add(1, new KeyValuePair<string, object?>("scope", "dht"));
+                return;
+            }
+
+            // Over UDP the reachable endpoint is the datagram source (the peer's
+            // public / hole-punched mapping), so route replies there directly.
+            if (message.SenderPublicKey.Length > 0)
+                _routingTable.TryAddNode(new KademliaNode(message.SenderId, message.SenderPublicKey, sender));
+
+            var response = await DispatchAsync(message, sender).ConfigureAwait(false);
+
+            if (response != null && _udp != null)
+            {
+                response.SenderPort = LocalPort;
+                await _udp.SendReliableAsync(sender, response.Serialize()).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error handling UDP message from {Sender}", sender);
+        }
+    }
+
     private static readonly TimeSpan ShutdownDrainTimeout = TimeSpan.FromSeconds(5);
 
     public async Task StopAsync()
     {
         _cts?.Cancel();
         _listener?.Stop();
+
+        if (_udp != null)
+            await _udp.StopAsync().ConfigureAwait(false);
 
         if (_listenTask != null)
         {
@@ -608,6 +687,13 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             EncryptedPayload = wirePayload
         };
 
+        if (_udp != null)
+        {
+            wrapper.SenderPort = LocalPort;
+            if (await _udp.SendReliableAsync(endpoint, wrapper.Serialize()).ConfigureAwait(false))
+                return;
+        }
+
         await SendOneWayAsync(endpoint, wrapper).ConfigureAwait(false);
     }
 
@@ -790,9 +876,53 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
     /// <summary>
     /// Non-generic transport hook used by extracted services (OfflineMessageService,
-    /// HolePunchCoordinator) so they don't need a generic delegate.
+    /// HolePunchCoordinator) so they don't need a generic delegate. When the UDP
+    /// transport is enabled it is tried first (it reaches hole-punched NAT'd peers);
+    /// TCP is the fallback for peers that only speak the TCP listener.
     /// </summary>
     internal async Task<KademliaMessage?> SendRequestAsync(IPEndPoint endpoint, KademliaMessage request)
+    {
+        if (_udp != null)
+        {
+            var viaUdp = await SendRequestOverUdpAsync(endpoint, request).ConfigureAwait(false);
+            if (viaUdp != null)
+                return viaUdp;
+        }
+
+        return await SendRequestOverTcpAsync(endpoint, request).ConfigureAwait(false);
+    }
+
+    private async Task<KademliaMessage?> SendRequestOverUdpAsync(IPEndPoint endpoint, KademliaMessage request)
+    {
+        var tcs = new TaskCompletionSource<KademliaMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingRequests[request.MessageId] = tcs;
+        try
+        {
+            request.SenderPort = LocalPort;
+            var data = request.Serialize();
+
+            var acked = await _udp!.SendReliableAsync(endpoint, data).ConfigureAwait(false);
+            if (!acked)
+                return null;
+
+            return await tcs.Task.WaitAsync(RequestTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "UDP request to {Endpoint} failed", endpoint);
+            return null;
+        }
+        finally
+        {
+            _pendingRequests.TryRemove(request.MessageId, out _);
+        }
+    }
+
+    private async Task<KademliaMessage?> SendRequestOverTcpAsync(IPEndPoint endpoint, KademliaMessage request)
     {
         var tcs = new TaskCompletionSource<KademliaMessage>();
         _pendingRequests[request.MessageId] = tcs;
@@ -864,6 +994,9 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
         await StopAsync().ConfigureAwait(false);
         await _backgroundTasks.DisposeAsync().ConfigureAwait(false);
+
+        if (_udp != null)
+            await _udp.DisposeAsync().ConfigureAwait(false);
 
         if (_natTraversal != null)
             await _natTraversal.DisposeAsync().ConfigureAwait(false);
