@@ -150,30 +150,30 @@ public sealed class UdpEndpoint : IAsyncDisposable
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
             linked.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var sender = Task.Run(async () =>
+            // Send probes until we receive one from the peer. Once we do, keep
+            // sending a few more so a peer that started listening later than us
+            // still receives probes — otherwise the side that confirms first
+            // stops early and the other side never converges.
+            for (int i = 0; i < 50 && !linked.IsCancellationRequested; i++)
             {
-                for (int i = 0; i < 50 && !linked.IsCancellationRequested; i++)
-                {
-                    try { await SendDatagramAsync(remote, probe).ConfigureAwait(false); } catch { }
-                    try { await Task.Delay(TimeSpan.FromMilliseconds(200), linked.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
-                }
-            }, linked.Token);
+                try { await SendDatagramAsync(remote, probe).ConfigureAwait(false); } catch { }
 
-            try
-            {
-                await tcs.Task.WaitAsync(linked.Token).ConfigureAwait(false);
-                return true;
+                if (tcs.Task.IsCompleted)
+                {
+                    for (int j = 0; j < 5; j++)
+                    {
+                        try { await SendDatagramAsync(remote, probe).ConfigureAwait(false); } catch { }
+                        try { await Task.Delay(TimeSpan.FromMilliseconds(60), linked.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { break; }
+                    }
+                    return true;
+                }
+
+                try { await Task.Delay(TimeSpan.FromMilliseconds(200), linked.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
             }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
-            finally
-            {
-                linked.Cancel();
-                try { await sender.ConfigureAwait(false); } catch { }
-            }
+
+            return tcs.Task.IsCompletedSuccessfully;
         }
         finally
         {
@@ -290,7 +290,12 @@ public sealed class UdpEndpoint : IAsyncDisposable
             return;
         var punchId = new Guid(data.AsSpan(4, 16));
         if (_punchSessions.TryGetValue(punchId, out var tcs))
+        {
             tcs.TrySetResult(sender);
+            // Echo a probe back so a peer that started later still receives one
+            // even after we've stopped our own send loop.
+            _ = SendDatagramAsync(sender, BuildProbe(punchId));
+        }
     }
 
     private async Task HandleReliableAsync(IPEndPoint sender, byte[] data)

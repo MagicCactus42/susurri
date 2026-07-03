@@ -108,4 +108,76 @@ public class UdpTransportTests
         var results = await Task.WhenAll(aTask, bTask).WaitAsync(TimeSpan.FromSeconds(12));
         results.ShouldAllBe(r => r);
     }
+
+    private static void SeedPublicEndpoint(KademliaDhtNode node) =>
+        node.SetPublicUdpEndpoint(new IPEndPoint(IPAddress.Loopback, node.LocalPort));
+
+    private static KademliaNode NodeRef(KademliaDhtNode node) =>
+        new(node.LocalId, node.EncryptionPublicKey, new IPEndPoint(IPAddress.Loopback, node.LocalPort));
+
+    [Fact]
+    public async Task Coordinated_Punch_Through_Intermediary_Resolves_Target()
+    {
+        // Topology: A knows only the intermediary I; I knows the target B.
+        // A must reach B by signalling a hole punch through I over the DHT.
+        await using var a = MakeUdpNode(out _);
+        await using var intermediary = MakeUdpNode(out _);
+        await using var b = MakeUdpNode(out _);
+
+        await a.StartAsync(0);
+        await intermediary.StartAsync(0);
+        await b.StartAsync(0);
+
+        SeedPublicEndpoint(a);
+        SeedPublicEndpoint(b);
+
+        // The intermediary and B know each other; A only knows the intermediary.
+        await intermediary.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, b.LocalPort) });
+        await b.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, intermediary.LocalPort) });
+
+        var resolved = await a.HolePunchThroughAsync(NodeRef(intermediary), b.LocalId)
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        resolved.ShouldNotBeNull();
+        resolved.Port.ShouldBe(b.LocalPort);
+
+        // Having punched, A can now talk to B directly at the resolved endpoint.
+        (await a.PingEndpointAsync(resolved)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SendRequestToNode_Falls_Back_To_Coordinated_Punch_When_Direct_Fails()
+    {
+        await using var a = MakeUdpNode(out _);
+        await using var intermediary = MakeUdpNode(out _);
+        await using var b = MakeUdpNode(out _);
+
+        await a.StartAsync(0);
+        await intermediary.StartAsync(0);
+        await b.StartAsync(0);
+
+        SeedPublicEndpoint(a);
+        SeedPublicEndpoint(b);
+
+        await intermediary.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, b.LocalPort) });
+        await b.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, intermediary.LocalPort) });
+        await a.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, intermediary.LocalPort) });
+
+        // A holds a record for B with a dead direct endpoint (port nobody listens on).
+        var unreachableB = new KademliaNode(
+            b.LocalId, b.EncryptionPublicKey, new IPEndPoint(IPAddress.Loopback, 1));
+
+        var request = new Susurri.Modules.DHT.Core.Kademlia.Protocol.FindNodeMessage
+        {
+            SenderId = a.LocalId,
+            SenderPublicKey = a.EncryptionPublicKey,
+            TargetId = a.LocalId
+        };
+
+        var response = await a.SendRequestToNodeAsync(unreachableB, request)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        response.ShouldNotBeNull();
+        response.SenderId.ShouldBe(b.LocalId);
+    }
 }

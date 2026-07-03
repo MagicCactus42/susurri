@@ -15,28 +15,28 @@ namespace Susurri.Modules.DHT.Core.Kademlia;
 internal sealed class HolePunchCoordinator
 {
     private readonly RoutingTable _routingTable;
-    private readonly NatTraversalService? _natTraversal;
     private readonly KademliaId _localId;
     private readonly byte[] _encryptionPublicKey;
     private readonly Func<IPEndPoint, KademliaMessage, Task<KademliaMessage?>> _sendRequest;
-    private readonly BackgroundTaskRunner _backgroundTasks;
+    private readonly Func<string> _getPublicEndpoint;
+    private readonly Action<Guid, IPEndPoint> _startPunch;
     private readonly ILogger _logger;
 
     public HolePunchCoordinator(
         RoutingTable routingTable,
-        NatTraversalService? natTraversal,
         KademliaId localId,
         byte[] encryptionPublicKey,
         Func<IPEndPoint, KademliaMessage, Task<KademliaMessage?>> sendRequest,
-        BackgroundTaskRunner backgroundTasks,
+        Func<string> getPublicEndpoint,
+        Action<Guid, IPEndPoint> startPunch,
         ILogger logger)
     {
         _routingTable = routingTable;
-        _natTraversal = natTraversal;
         _localId = localId;
         _encryptionPublicKey = encryptionPublicKey;
         _sendRequest = sendRequest;
-        _backgroundTasks = backgroundTasks;
+        _getPublicEndpoint = getPublicEndpoint;
+        _startPunch = startPunch;
         _logger = logger;
     }
 
@@ -73,26 +73,24 @@ internal sealed class HolePunchCoordinator
         return await HandleAsIntermediaryAsync(request).ConfigureAwait(false);
     }
 
-    private async Task<HolePunchResponseMessage> HandleAsTargetAsync(HolePunchRequestMessage request)
+    private Task<HolePunchResponseMessage> HandleAsTargetAsync(HolePunchRequestMessage request)
     {
-        if (_natTraversal == null || !_natTraversal.CanHolePunch)
+        var myEndpoint = _getPublicEndpoint();
+        if (string.IsNullOrEmpty(myEndpoint))
         {
-            return Reject(request, accepted: false);
+            // We don't know our own public UDP endpoint, so we can't be punched to.
+            return Task.FromResult(Reject(request, accepted: false));
         }
-
-        var myEndpoint = _natTraversal.GetPublicEndpointString();
 
         var remoteEndpoint = NatTraversalService.ParseEndpoint(request.InitiatorEndpoint);
         if (remoteEndpoint != null)
         {
-            var nat = _natTraversal!;
-            var punchId = request.PunchId;
-            _backgroundTasks.Run(
-                async () => await nat.HolePunchAsync(punchId, remoteEndpoint).ConfigureAwait(false),
-                $"Hole punch response-side ({punchId})");
+            // Start punching toward the initiator so the hole is open by the time
+            // it receives our response and starts punching back.
+            _startPunch(request.PunchId, remoteEndpoint);
         }
 
-        return new HolePunchResponseMessage
+        return Task.FromResult(new HolePunchResponseMessage
         {
             SenderId = _localId,
             SenderPublicKey = _encryptionPublicKey,
@@ -100,7 +98,7 @@ internal sealed class HolePunchCoordinator
             Accepted = true,
             TargetEndpoint = myEndpoint,
             PunchId = request.PunchId
-        };
+        });
     }
 
     private async Task<HolePunchResponseMessage> HandleAsIntermediaryAsync(HolePunchRequestMessage request)

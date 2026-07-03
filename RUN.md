@@ -115,17 +115,25 @@ Each node speaks its Kademlia + onion protocol over a **reliable UDP transport**
 TCP as a fallback. UDP is preferred because it can traverse NAT via UDP
 hole-punching; TCP is used when a peer only exposes its TCP listener.
 
+When a node can't reach a peer directly, it **auto-coordinates a hole punch
+through the DHT**: it asks an intermediary that can reach the target to relay a
+punch request, learns the target's public endpoint from the reply, punches on
+the shared socket, and retries — no manual signalling.
+
 Config (`appsettings.json` → `DHT:Nat`, or env `DHT__Nat__Enabled`):
 
 ```json
-"Nat": { "Enabled": true, "UseStun": false }
+"Nat": { "Enabled": true, "UseStun": false, "PublicEndpoint": "" }
 ```
 
 - `Enabled` (default true): run the UDP transport + hole-punch path.
 - `UseStun` (default false): discover this node's public `ip:port` via public
   STUN servers so it can be advertised for hole-punching. This reveals your IP
   to third-party STUN servers, so it's **opt-in**. Turn it on for nodes behind
-  NAT that need to be reachable; a node on a public IP doesn't need it.
+  NAT that need to be reachable.
+- `PublicEndpoint` (e.g. `"203.0.113.5:7070"`): set this on a node with a known
+  public IP instead of using STUN — it's advertised as-is for hole-punch
+  coordination. A node needs either this or `UseStun` on to be punch-reachable.
 
 ## Do I need a VPS?
 

@@ -84,6 +84,7 @@ internal sealed class DhtCommand : ICommand
 
             var udpEnabled = config.GetValue("DHT:Nat:Enabled", true);
             var useStun = config.GetValue("DHT:Nat:UseStun", false);
+            var publicEndpoint = ParseEndpoint(config["DHT:Nat:PublicEndpoint"] ?? string.Empty);
 
             var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
@@ -91,7 +92,8 @@ internal sealed class DhtCommand : ICommand
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
 
             var node = new KademliaDhtNode(encryptionKey, logger, signingKey,
-                natTraversal: null, enableUdpTransport: udpEnabled, useStun: useStun);
+                natTraversal: null, enableUdpTransport: udpEnabled, useStun: useStun,
+                publicUdpEndpoint: publicEndpoint);
             var cts = new CancellationTokenSource();
 
             await node.StartAsync(port).ConfigureAwait(false);

@@ -27,6 +27,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     private readonly HolePunchCoordinator _holePunch;
     private readonly UdpEndpoint? _udp;
     private readonly bool _useStun;
+    private readonly ConcurrentDictionary<KademliaId, IPEndPoint> _punchedEndpoints = new();
     private bool _disposed;
 
     private TcpListener? _listener;
@@ -62,7 +63,8 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         Key? signingKey = null,
         NatTraversalService? natTraversal = null,
         bool enableUdpTransport = false,
-        bool useStun = false)
+        bool useStun = false,
+        IPEndPoint? publicUdpEndpoint = null)
     {
         EncryptionKey = encryptionKey;
         EncryptionPublicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
@@ -75,6 +77,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         _natTraversal = natTraversal;
         _useStun = useStun;
         _udp = enableUdpTransport ? new UdpEndpoint(logger) : null;
+        PublicUdpEndPoint = publicUdpEndpoint;
         _backgroundTasks = new BackgroundTaskRunner(logger);
 
         _offlineMessages = new OfflineMessageService(
@@ -90,13 +93,19 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
         _holePunch = new HolePunchCoordinator(
             routingTable: _routingTable,
-            natTraversal: _natTraversal,
             localId: LocalId,
             encryptionPublicKey: EncryptionPublicKey,
             sendRequest: SendRequestAsync,
-            backgroundTasks: _backgroundTasks,
+            getPublicEndpoint: () => PublicUdpEndPoint != null ? FormatEndpoint(PublicUdpEndPoint) : string.Empty,
+            startPunch: (punchId, remote) =>
+            {
+                if (_udp != null)
+                    _backgroundTasks.Run(() => _udp.HolePunchAsync(punchId, remote), $"hole punch response ({punchId})");
+            },
             logger: _logger);
     }
+
+    private static string FormatEndpoint(IPEndPoint endpoint) => $"{endpoint.Address}:{endpoint.Port}";
 
     public async Task StartAsync(int port)
     {
@@ -366,6 +375,87 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         KademliaNode intermediary,
         HolePunchRequestMessage request)
         => _holePunch.SendRequestAsync(intermediary, request);
+
+    internal void SetPublicUdpEndpoint(IPEndPoint endpoint) => PublicUdpEndPoint = endpoint;
+
+    /// <summary>
+    /// Coordinates a UDP hole punch to <paramref name="targetId"/> through an
+    /// intermediary that can reach the target. Sends a HolePunchRequest (carrying
+    /// our public endpoint) which the intermediary forwards to the target; the
+    /// target replies with its public endpoint and starts punching back. On
+    /// success returns the target's now-reachable UDP endpoint and caches it.
+    /// </summary>
+    internal async Task<IPEndPoint?> HolePunchThroughAsync(KademliaNode intermediary, KademliaId targetId)
+    {
+        if (_udp == null || PublicUdpEndPoint == null)
+            return null;
+
+        var punchId = Guid.NewGuid();
+        var request = new HolePunchRequestMessage
+        {
+            SenderId = LocalId,
+            SenderPublicKey = EncryptionPublicKey,
+            TargetNodeId = targetId,
+            InitiatorEndpoint = FormatEndpoint(PublicUdpEndPoint),
+            PunchId = punchId
+        };
+
+        var response = await _holePunch.SendRequestAsync(intermediary, request).ConfigureAwait(false);
+        if (response is not { Accepted: true })
+            return null;
+
+        var targetEndpoint = NatTraversalService.ParseEndpoint(response.TargetEndpoint);
+        if (targetEndpoint == null)
+            return null;
+
+        var punched = await _udp.HolePunchAsync(punchId, targetEndpoint).ConfigureAwait(false);
+        if (!punched)
+            return null;
+
+        _punchedEndpoints[targetId] = targetEndpoint;
+        _logger.LogInformation("Hole punch to {Target} succeeded via {Intermediary}; reachable at {Endpoint}",
+            targetId.ToString()[..16], intermediary.Id.ToString()[..16], targetEndpoint);
+        return targetEndpoint;
+    }
+
+    /// <summary>
+    /// Sends a request to a known node, transparently coordinating a hole punch
+    /// through an intermediary if the node can't be reached directly.
+    /// </summary>
+    internal async Task<KademliaMessage?> SendRequestToNodeAsync(KademliaNode node, KademliaMessage request)
+    {
+        if (_udp != null && _punchedEndpoints.TryGetValue(node.Id, out var cached))
+        {
+            var viaCached = await SendRequestOverUdpAsync(cached, request).ConfigureAwait(false);
+            if (viaCached != null)
+                return viaCached;
+            _punchedEndpoints.TryRemove(node.Id, out _);
+        }
+
+        var direct = await SendRequestAsync(node.EndPoint, request).ConfigureAwait(false);
+        if (direct != null)
+            return direct;
+
+        if (_udp == null || PublicUdpEndPoint == null)
+            return null;
+
+        var intermediary = PickIntermediary(node.Id);
+        if (intermediary == null)
+            return null;
+
+        var endpoint = await HolePunchThroughAsync(intermediary, node.Id).ConfigureAwait(false);
+        if (endpoint == null)
+            return null;
+
+        return await SendRequestOverUdpAsync(endpoint, request).ConfigureAwait(false);
+    }
+
+    private KademliaNode? PickIntermediary(KademliaId targetId)
+    {
+        return _routingTable
+            .FindClosestNodes(targetId, Alpha)
+            .FirstOrDefault(n => n.Id != targetId && n.Id != LocalId);
+    }
 
     private async Task ListenAsync(CancellationToken ct)
     {
@@ -814,7 +904,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             TargetId = targetId
         };
 
-        return await SendRequestAsync<FindNodeResponseMessage>(node.EndPoint, request).ConfigureAwait(false);
+        return await SendRequestToNodeAsync(node, request).ConfigureAwait(false) as FindNodeResponseMessage;
     }
 
     private async Task<FindValueResponseMessage?> SendFindValueAsync(KademliaNode node, KademliaId key)
@@ -826,13 +916,13 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             Key = key
         };
 
-        return await SendRequestAsync<FindValueResponseMessage>(node.EndPoint, request).ConfigureAwait(false);
+        return await SendRequestToNodeAsync(node, request).ConfigureAwait(false) as FindValueResponseMessage;
     }
 
     private async Task SendStoreAsync(KademliaNode node, KademliaId key, byte[] value)
     {
         var request = CreateSignedStoreMessage(key, value, 86400);
-        await SendRequestAsync<StoreResponseMessage>(node.EndPoint, request).ConfigureAwait(false);
+        await SendRequestToNodeAsync(node, request).ConfigureAwait(false);
     }
 
     private StoreMessage CreateSignedStoreMessage(KademliaId key, byte[] value, uint ttlSeconds)
