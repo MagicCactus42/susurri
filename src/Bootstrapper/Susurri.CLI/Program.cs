@@ -25,16 +25,25 @@ public static class Program
         Console.WriteLine();
 
         using var shutdown = new CancellationTokenSource();
+
+        void RequestShutdown()
+        {
+            try
+            {
+                shutdown.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
-            shutdown.Cancel();
+            RequestShutdown();
             ConsoleUi.PrintInfo("Shutdown signal received...");
         };
-        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
-        {
-            shutdown.Cancel();
-        };
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => RequestShutdown();
 
         try
         {

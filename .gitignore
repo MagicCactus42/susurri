@@ -60,6 +60,7 @@ nunit-*.xml
 publish/
 publish-cli/
 publish-gui/
+dist/
 
 # Local secrets (docker-compose, connection strings)
 .env
