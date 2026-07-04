@@ -53,6 +53,10 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 
+# IDE
+.idea/
+*.DotSettings.user
+
 # Claude
 .claude
 

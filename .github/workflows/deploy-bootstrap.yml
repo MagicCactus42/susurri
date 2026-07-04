@@ -1,0 +1,69 @@
+name: deploy-bootstrap
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-bootstrap
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  ContinuousIntegrationBuild: 'true'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    environment: bootstrap-vps
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: publish
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r linux-x64 --self-contained -o publish-bootstrap
+
+      - name: smoke test
+        run: ./publish-bootstrap/susurri-cli version
+
+      - name: package
+        run: tar -czf "susurri-bootstrap-$RELEASE_SHA.tar.gz" -C publish-bootstrap .
+
+      - name: configure ssh
+        env:
+          SSH_KEY: ${{ secrets.BOOTSTRAP_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.BOOTSTRAP_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/bootstrap_deploy
+          chmod 600 ~/.ssh/bootstrap_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: upload release
+        env:
+          SSH_HOST: ${{ secrets.BOOTSTRAP_HOST }}
+          SSH_USER: ${{ secrets.BOOTSTRAP_USER }}
+        run: scp -i ~/.ssh/bootstrap_deploy -o StrictHostKeyChecking=yes "susurri-bootstrap-$RELEASE_SHA.tar.gz" "$SSH_USER@$SSH_HOST:/opt/susurri/incoming/"
+
+      - name: activate release
+        env:
+          SSH_HOST: ${{ secrets.BOOTSTRAP_HOST }}
+          SSH_USER: ${{ secrets.BOOTSTRAP_USER }}
+        run: ssh -i ~/.ssh/bootstrap_deploy -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" bash -s "$RELEASE_SHA" < deploy/activate-release.sh

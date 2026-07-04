@@ -1,0 +1,36 @@
+[Unit]
+Description=Susurri bootstrap seed node
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=susurri
+Group=susurri
+WorkingDirectory=/opt/susurri/current
+ExecStart=/opt/susurri/current/susurri-cli --bootstrap -p 7070
+EnvironmentFile=-/etc/susurri/bootstrap.env
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=HOME=/var/lib/susurri
+StateDirectory=susurri
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
