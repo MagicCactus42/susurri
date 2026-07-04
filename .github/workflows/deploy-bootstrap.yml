@@ -37,7 +37,7 @@ jobs:
           dotnet-quality: preview
 
       - name: publish
-        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r linux-x64 --self-contained -o publish-bootstrap
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r linux-x64 --self-contained -o publish-bootstrap /p:RestoreLockedMode=false
 
       - name: smoke test
         run: ./publish-bootstrap/susurri-cli version
