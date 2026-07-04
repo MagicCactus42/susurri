@@ -115,8 +115,32 @@ delivered to the recipient, or stored in the DHT if they're offline.
 # > group list / group msgs <group-id>
 ```
 
-Group messages are encrypted with a shared group key (wrapped per member on
-invite) and delivered to each member over onion routing.
+Group messages are encrypted with per-sender ratchet chains (forward secrecy);
+the shared group key (wrapped per member on invite) proves membership and seals
+invites. `group rotate <group-id>` (owner only) issues a new group key and
+delivers it to every member in-band — owner-signed, sealed per member, applied
+automatically (offline members get it on next login). `group kick <group-id>
+<member>` removes a member and re-keys the remaining ones in the same way, so
+the removed member is cut off immediately.
+
+### Contacts
+
+```bash
+# > contacts add ala bob            (pins bob's current key under the petname "ala")
+# > send ala hi                     (petnames work anywhere a username does)
+# > contacts verify ala             (compare the safety number out of band, mark verified)
+# > contacts check ala              (compare the pinned key against the live DHT record)
+```
+
+A pinned contact's key is used directly — DHT lookups can no longer redirect
+messages for that contact — and their messages display under the petname.
+
+### History
+
+Conversations live in RAM by default: a restart forgets everything. `history on`
+persists them to an encrypted local store (key derived from your passphrase, per
+identity); `history off` shreds it; `history` shows status. The `chats` browser
+picks stored conversations up automatically on the next login.
 
 ## Identity
 

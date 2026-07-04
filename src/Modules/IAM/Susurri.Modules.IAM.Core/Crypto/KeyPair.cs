@@ -12,8 +12,9 @@ public sealed class KeyPair : IDisposable
     public byte[] EncryptionPublicKey { get; }
 
     public byte[]? DerivationSalt { get; }
+    public byte[]? LocalStoreKey { get; }
 
-    public KeyPair(Key signingKey, Key encryptionKey, byte[]? derivationSalt = null)
+    public KeyPair(Key signingKey, Key encryptionKey, byte[]? derivationSalt = null, byte[]? localStoreKey = null)
     {
         SigningKey = signingKey ?? throw new ArgumentNullException(nameof(signingKey));
         EncryptionKey = encryptionKey ?? throw new ArgumentNullException(nameof(encryptionKey));
@@ -21,11 +22,14 @@ public sealed class KeyPair : IDisposable
         SigningPublicKey = signingKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
         EncryptionPublicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
         DerivationSalt = derivationSalt;
+        LocalStoreKey = localStoreKey;
     }
 
     public void Dispose()
     {
         SigningKey.Dispose();
         EncryptionKey.Dispose();
+        if (LocalStoreKey != null)
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(LocalStoreKey);
     }
 }

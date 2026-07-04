@@ -24,13 +24,21 @@ already done.
   with `FileOptions.DeleteOnClose` instead of holding chunks in memory.
 
 ### 1.8 Forward secrecy ratchet
-- **What:** Each onion message uses fresh ephemeral X25519 keypairs (already
-  good per-message forward secrecy), but there is no Signal-style chain-key
-  ratchet for repeated peer-to-peer exchanges.
-- **Why deferred:** the per-message ephemerals satisfy practical FS for the
-  threat model. A full ratchet is its own protocol design effort.
-- **Target:** **Phase 6** — new `SessionKeyManager.cs`, per-peer chain key
-  seeded from first ECDH handshake, ratcheted on every `SendReplyAsync`.
+- **What:** Direct messages run a per-peer double ratchet
+  (`RatchetSessionManager` + `DoubleRatchet`); group messages run per-sender
+  HKDF hash chains with sealed sender-key distribution (`GroupRatchetManager`).
+  Group re-keying is automatic and in-band: sender chains re-seed on an epoch
+  (256 messages / 24 h), and the group key rotates on `group rotate` /
+  `group kick` via owner-signed, per-member-sealed `GroupRekeyMessage`s with
+  monotonic versions and roster sync. What remains: rotation is owner-driven
+  (an offline owner cannot re-key; a member's voluntary `group leave` sends no
+  notification, so it does not trigger one), and distribution is O(n) rewrap
+  per rotation rather than TreeKEM's O(log n).
+- **Why deferred:** owner-driven O(n) re-key is sound and simple at the group
+  sizes the CLI targets; decentralized rotation authority and TreeKEM-style
+  efficiency are a full MLS-shaped protocol effort.
+- **Target:** **Phase 6 follow-up** — leave-notification message so departures
+  trigger rotation, and evaluate MLS/TreeKEM if groups need to scale.
 
 ---
 

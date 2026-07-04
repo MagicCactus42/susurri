@@ -30,6 +30,10 @@ public sealed class OnionRouter
 
     public event Func<GroupChat.EncryptedGroupMessage, Task>? OnGroupMessageReceived;
 
+    public event Func<GroupChat.EncryptedGroupMessageV2, byte[]?, Task>? OnGroupMessageV2Received;
+
+    public event Func<GroupChat.GroupRekeyMessage, Task>? OnGroupRekeyReceived;
+
     public event Func<Guid, Task>? OnAckReceived;
 
     public OnionRouter(Key encryptionKey, KademliaDhtNode dhtNode, ILogger<OnionRouter> logger)
@@ -418,6 +422,14 @@ public sealed class OnionRouter
         {
             await HandleGroupDeliveryAsync(unpaddedMessage).ConfigureAwait(false);
         }
+        else if (MessageEnvelope.IsGroupMessageV2(unpaddedMessage))
+        {
+            await HandleGroupV2DeliveryAsync(unpaddedMessage).ConfigureAwait(false);
+        }
+        else if (MessageEnvelope.IsGroupRekey(unpaddedMessage))
+        {
+            await HandleGroupRekeyDeliveryAsync(unpaddedMessage).ConfigureAwait(false);
+        }
         else
         {
             await HandleChatDeliveryAsync(unpaddedMessage, payload.ReplyPath, freshness).ConfigureAwait(false);
@@ -443,6 +455,62 @@ public sealed class OnionRouter
         if (OnGroupMessageReceived != null)
         {
             await OnGroupMessageReceived(encrypted).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleGroupV2DeliveryAsync(byte[] unpaddedMessage)
+    {
+        using var ms = new MemoryStream(unpaddedMessage, 1, unpaddedMessage.Length - 1);
+        using var reader = new BinaryReader(ms);
+
+        byte[]? sealedDistribution = null;
+        if (reader.ReadBoolean())
+        {
+            var distributionLen = reader.ReadInt32();
+            if (distributionLen <= 0 || distributionLen > SecurityLimits.MaxValueSize)
+            {
+                _logger.LogWarning("Dropped group message with invalid distribution length {Length}", distributionLen);
+                return;
+            }
+            sealedDistribution = reader.ReadBytes(distributionLen);
+        }
+
+        var body = reader.ReadBytes((int)(ms.Length - ms.Position));
+        var encrypted = GroupChat.EncryptedGroupMessageV2.Deserialize(body);
+
+        if (!_replayCache.TryRecord(encrypted.MessageId))
+        {
+            SusurriMetrics.ReplaysDropped.Add(1, new KeyValuePair<string, object?>("scope", "onion-group"));
+            _logger.LogDebug("Replay dropped: group message {MessageId}", encrypted.MessageId);
+            return;
+        }
+
+        _logger.LogInformation("Received group message {MessageId} for group {GroupId}",
+            encrypted.MessageId, encrypted.GroupId);
+
+        if (OnGroupMessageV2Received != null)
+        {
+            await OnGroupMessageV2Received(encrypted, sealedDistribution).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleGroupRekeyDeliveryAsync(byte[] unpaddedMessage)
+    {
+        var rekey = GroupChat.GroupRekeyMessage.Deserialize(unpaddedMessage.AsSpan(1).ToArray());
+
+        if (!_replayCache.TryRecord(rekey.MessageId))
+        {
+            SusurriMetrics.ReplaysDropped.Add(1, new KeyValuePair<string, object?>("scope", "onion-group-rekey"));
+            _logger.LogDebug("Replay dropped: group rekey {MessageId}", rekey.MessageId);
+            return;
+        }
+
+        _logger.LogInformation("Received group rekey {MessageId} for group {GroupId}",
+            rekey.MessageId, rekey.GroupId);
+
+        if (OnGroupRekeyReceived != null)
+        {
+            await OnGroupRekeyReceived(rekey).ConfigureAwait(false);
         }
     }
 

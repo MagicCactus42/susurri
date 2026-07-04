@@ -5,6 +5,7 @@ using System.Text;
 using dotnetstandard_bip39;
 using NSec.Cryptography;
 using Susurri.Shared.Abstractions.Diagnostics;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.IAM.Core.Crypto;
 
@@ -138,7 +139,9 @@ public sealed class CryptoKeyGenerator : ICryptoKeyGenerator
             seed[32..64],
             KeyBlobFormat.RawPrivateKey);
 
-        return new KeyPair(signingKey, encryptionKey, derivationSalt);
+        var localStoreKey = LocalEncryption.DeriveSubkey(seed, HkdfContexts.LocalStoreKey);
+
+        return new KeyPair(signingKey, encryptionKey, derivationSalt, localStoreKey);
     }
 
     private static void ValidateSalt(byte[] salt)

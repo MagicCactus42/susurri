@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
+using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 
 namespace Susurri.CLI.Commands;
@@ -78,8 +79,6 @@ internal sealed class DhtCommand : ICommand
         // node can be pointed at a network by configuration alone.
         var seeds = NodeConfig.Seeds(config, args.Skip(1));
 
-        ConsoleUi.PrintInfo($"Starting DHT node on port {port}...");
-
         try
         {
             var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
@@ -100,20 +99,23 @@ internal sealed class DhtCommand : ICommand
                 publicUdpEndpoint: publicEndpoint, networkId: networkId);
             var cts = new CancellationTokenSource();
 
-            await node.StartAsync(port).ConfigureAwait(false);
+            await ConsoleUi.WithSpinnerAsync($"starting dht node on port {port}",
+                () => node.StartAsync(port)).ConfigureAwait(false);
             _session.SetDhtNode(node, cts);
 
             if (seeds.Count > 0)
-            {
-                ConsoleUi.PrintInfo($"Bootstrapping against {seeds.Count} seed node(s)...");
-                await node.BootstrapAsync(seeds).ConfigureAwait(false);
-            }
+                await ConsoleUi.WithSpinnerAsync($"bootstrapping against {seeds.Count} seed node(s)",
+                    () => node.BootstrapAsync(seeds)).ConfigureAwait(false);
 
-            ConsoleUi.PrintSuccess("DHT node started.");
-            ConsoleUi.PrintInfo($"  Node ID:   {node.LocalId.ToString()[..16]}");
-            ConsoleUi.PrintInfo($"  Port:      {port} (TCP + UDP)");
-            ConsoleUi.PrintInfo($"  Transport: {(udpEnabled ? "UDP + TCP fallback" : "TCP only")}{(useStun ? ", STUN" : "")}");
-            ConsoleUi.PrintInfo($"  Peers:     {node.KnownNodes}");
+            Console.WriteLine();
+            ConsoleUi.Panel("dht node", new[]
+            {
+                ("state", "● running", Palette.Green),
+                ("node id", node.LocalId.ToString()[..16], Palette.Mauve),
+                ("port", $"{port} (tcp + udp)", Palette.Text),
+                ("transport", $"{(udpEnabled ? "udp + tcp fallback" : "tcp only")}{(useStun ? " · stun" : "")}", Palette.Text),
+                ("peers", node.KnownNodes.ToString(), node.KnownNodes > 0 ? Palette.Green : Palette.Red)
+            }, Palette.Green);
         }
         catch (Exception ex)
         {

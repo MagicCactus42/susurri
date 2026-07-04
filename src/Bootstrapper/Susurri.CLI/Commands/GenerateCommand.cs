@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Susurri.CLI.Tui;
 using Susurri.Modules.IAM.Core.Crypto;
 
 namespace Susurri.CLI.Commands;
@@ -32,19 +33,24 @@ internal sealed class GenerateCommand : ICommand
             }
 
             var passphrase = keyGenerator.GeneratePassphrase(wordCount);
+            var words = passphrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var lines = new List<string>();
+            for (var i = 0; i < words.Length; i += 4)
+            {
+                var row = words.Skip(i).Take(4)
+                    .Select((w, j) => $"{ConsoleUi.Faint($"{i + j + 1,2}.")} {ConsoleUi.Color(w.PadRight(10), Palette.Yellow)}");
+                lines.Add(string.Join("  ", row));
+            }
+            lines.Add("");
+            lines.Add(ConsoleUi.Faint($"{wordCount} words · {wordCount * 11 - wordCount / 3} bits of entropy"));
 
             Console.WriteLine();
-            ConsoleUi.PrintHeader("=== Generated Passphrase ===");
+            ConsoleUi.Box("your identity", lines, Palette.Yellow);
             Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"  {passphrase}");
-            Console.ResetColor();
-            Console.WriteLine();
-            ConsoleUi.PrintWarning("IMPORTANT: Write this down and store it securely offline!");
-            ConsoleUi.PrintWarning("This passphrase is your identity. If you lose it, you lose access.");
-            ConsoleUi.PrintWarning("Anyone with this passphrase can impersonate you.");
-            Console.WriteLine();
-            ConsoleUi.PrintInfo($"Word count: {wordCount} ({wordCount * 11 - wordCount / 3} bits of entropy)");
+            ConsoleUi.PrintWarning("Write this down and store it securely offline!");
+            ConsoleUi.PrintWarning("This passphrase is your identity — lose it and access is gone.");
+            ConsoleUi.PrintWarning("Anyone holding it can impersonate you.");
         }
         catch (ArgumentException ex)
         {

@@ -30,8 +30,16 @@ internal sealed class SendCommand : ICommand
         var recipient = args[0];
         var content = string.Join(' ', args.Skip(1));
 
-        ConsoleUi.PrintInfo($"Sending to {recipient}...");
-        var result = await _session.Chat.SendMessageAsync(recipient, content).ConfigureAwait(false);
+        if (_session.Conversations is { } store)
+        {
+            await ConsoleUi.WithSpinnerAsync($"onion-routing to {recipient}",
+                () => store.SendDirectAsync(recipient, content)).ConfigureAwait(false);
+            ConsoleUi.PrintSuccess("Sent (see 'chats' for delivery status).");
+            return true;
+        }
+
+        var result = await ConsoleUi.WithSpinnerAsync($"onion-routing to {recipient}",
+            () => _session.Chat.SendMessageAsync(recipient, content)).ConfigureAwait(false);
 
         if (result.Success)
             ConsoleUi.PrintSuccess($"Sent (id {result.MessageId?.ToString()[..8]}).");

@@ -54,6 +54,12 @@ public static class FuzzTargets
     public static void EncryptedGroupMessageDeserialize(byte[] data)
         => EncryptedGroupMessage.Deserialize(data);
 
+    public static void EncryptedGroupMessageV2Deserialize(byte[] data)
+        => EncryptedGroupMessageV2.Deserialize(data);
+
+    public static void GroupRekeyMessageDeserialize(byte[] data)
+        => GroupRekeyMessage.Deserialize(data);
+
     /// <summary>
     /// Map of target name → action. Lets <see cref="Program"/> dispatch by
     /// the name passed on the command line, and lets the xUnit smoke tests
@@ -75,6 +81,8 @@ public static class FuzzTargets
             ["wrapped-group-key"] = WrappedGroupKeyDeserialize,
             ["group-message"] = GroupMessageDeserialize,
             ["encrypted-group-message"] = EncryptedGroupMessageDeserialize,
+            ["encrypted-group-message-v2"] = EncryptedGroupMessageV2Deserialize,
+            ["group-rekey"] = GroupRekeyMessageDeserialize,
         };
 
     /// <summary>

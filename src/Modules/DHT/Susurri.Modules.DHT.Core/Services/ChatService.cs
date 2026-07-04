@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
+using Susurri.Modules.DHT.Core.Contacts;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Network;
 using Susurri.Modules.DHT.Core.Onion;
@@ -27,10 +29,18 @@ public sealed class ChatService : IAsyncDisposable
 
     private readonly GroupManager _groupManager;
     private readonly RatchetSessionManager _ratchet;
+    private readonly GroupRatchetManager _groupRatchet;
+    private readonly byte[]? _localStoreKey;
     private readonly ConcurrentDictionary<Guid, ReceivedGroupMessage> _receivedGroupMessages = new();
+    private readonly Dictionary<string, List<EncryptedGroupMessageV2>> _pendingGroupV2 = new();
+    private readonly object _pendingGate = new();
     private static readonly TimeSpan GroupFreshness = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RekeyFreshness = TimeSpan.FromDays(8);
 
     private const int PathLength = 3;
+    private const int MaxPendingGroupMessages = 32;
+
+    public ContactBook? Contacts { get; }
 
     public event Func<ReceivedMessage, Task>? OnMessageReceived;
     public event Func<Guid, Task>? OnMessageAcknowledged;
@@ -52,7 +62,8 @@ public sealed class ChatService : IAsyncDisposable
         ILogger<RelayService> relayLogger,
         ILogger<ConnectionManager> connectionLogger,
         Key? signingKey = null,
-        ChatNodeOptions? nodeOptions = null)
+        ChatNodeOptions? nodeOptions = null,
+        byte[]? localStoreKey = null)
     {
         var options = nodeOptions ?? new ChatNodeOptions();
         _encryptionKey = encryptionKey;
@@ -71,12 +82,19 @@ public sealed class ChatService : IAsyncDisposable
         _relayService = new RelayService(routingTable, relayLogger);
         _connectionManager = new ConnectionManager(routingTable, _relayService, connectionLogger);
 
-        _groupManager = new GroupManager(encryptionKey);
+        _localStoreKey = localStoreKey == null ? null : (byte[])localStoreKey.Clone();
+        _groupManager = new GroupManager(encryptionKey, _localStoreKey, _dhtNode.SigningPublicKey);
         _ratchet = new RatchetSessionManager(encryptionKey);
+        _groupRatchet = new GroupRatchetManager(_localStoreKey, _dhtNode.EncryptionPublicKey);
+        Contacts = _localStoreKey != null
+            ? new ContactBook(_localStoreKey, _dhtNode.EncryptionPublicKey)
+            : null;
 
         _router.OnMessageReceived += HandleIncomingMessageAsync;
         _router.OnAckReceived += HandleAckAsync;
         _router.OnGroupMessageReceived += HandleGroupMessageAsync;
+        _router.OnGroupMessageV2Received += HandleGroupMessageV2Async;
+        _router.OnGroupRekeyReceived += HandleGroupRekeyAsync;
     }
 
     public GroupInfo CreateGroup(string name) => _groupManager.CreateGroup(name);
@@ -92,8 +110,8 @@ public sealed class ChatService : IAsyncDisposable
         return invite;
     }
 
-    public GroupInfo? JoinGroup(WrappedGroupKey wrappedKey, string name)
-        => _groupManager.JoinGroup(wrappedKey, name);
+    public GroupInfo? JoinGroup(WrappedGroupKey wrappedKey, string name, byte[]? ownerSigningPublicKey = null)
+        => _groupManager.JoinGroup(wrappedKey, name, ownerSigningPublicKey);
 
     public void LeaveGroup(Guid groupId) => _groupManager.LeaveGroup(groupId);
 
@@ -116,6 +134,78 @@ public sealed class ChatService : IAsyncDisposable
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
         };
 
+        if (_signingKey == null)
+            return await SendGroupMessageLegacyAsync(group, message).ConfigureAwait(false);
+
+        var members = group.Members
+            .Where(m => !m.PublicKey.SequenceEqual(LocalPublicKey))
+            .ToList();
+        if (members.Count == 0)
+            return 0;
+
+        var keys = _groupRatchet.PrepareSend(group);
+        var needDistribution = members
+            .Where(m => _groupRatchet.NeedsDistribution(group, m.PublicKey))
+            .ToHashSet();
+
+        byte[] body;
+        try
+        {
+            body = EncryptedGroupMessageV2
+                .Seal(message, keys.MessageKey, keys.Generation, keys.Iteration, keys.KeyVersion)
+                .Serialize();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keys.MessageKey);
+        }
+
+        GroupSenderKeyDistribution? distribution = null;
+        if (needDistribution.Count > 0)
+        {
+            distribution = new GroupSenderKeyDistribution
+            {
+                GroupId = groupId,
+                Generation = keys.Generation,
+                Iteration = keys.Iteration,
+                KeyVersion = keys.KeyVersion,
+                ChainKey = keys.ChainKeySnapshot,
+                SenderPublicKey = LocalPublicKey,
+                SenderSigningPublicKey = LocalSigningPublicKey,
+                Timestamp = message.Timestamp
+            };
+            distribution.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
+                _signingKey, distribution.GetSignableData());
+        }
+
+        var delivered = 0;
+        foreach (var member in members)
+        {
+            var path = _dhtNode.GetRandomNodesForPath(PathLength);
+            if (path.Count == 0)
+                continue;
+
+            try
+            {
+                var attach = distribution != null && needDistribution.Contains(member);
+                var envelope = BuildGroupEnvelope(body, attach ? distribution!.SealFor(member.PublicKey) : null);
+                await _router.SendRawAsync(envelope, member.PublicKey, path).ConfigureAwait(false);
+                if (attach)
+                    _groupRatchet.MarkDistributed(group, member.PublicKey, keys.Iteration);
+                delivered++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to deliver group message to a member");
+            }
+        }
+
+        CryptographicOperations.ZeroMemory(keys.ChainKeySnapshot);
+        return delivered;
+    }
+
+    private async Task<int> SendGroupMessageLegacyAsync(GroupInfo group, GroupMessage message)
+    {
         var encrypted = message.EncryptUnpadded(group.Key);
         var body = encrypted.Serialize();
         var envelope = new byte[1 + body.Length];
@@ -144,6 +234,24 @@ public sealed class ChatService : IAsyncDisposable
         }
 
         return delivered;
+    }
+
+    private static byte[] BuildGroupEnvelope(byte[] body, byte[]? sealedDistribution)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write(MessageEnvelope.GroupMessageV2);
+        writer.Write(sealedDistribution != null);
+        if (sealedDistribution != null)
+        {
+            writer.Write(sealedDistribution.Length);
+            writer.Write(sealedDistribution);
+        }
+        writer.Write(body);
+
+        writer.Flush();
+        return ms.ToArray();
     }
 
     private async Task HandleGroupMessageAsync(EncryptedGroupMessage encrypted)
@@ -175,16 +283,7 @@ public sealed class ChatService : IAsyncDisposable
         if (message.SenderPublicKey.SequenceEqual(LocalPublicKey))
             return;
 
-        string? senderUsername = null;
-        var senderKeyHex = Convert.ToHexString(message.SenderPublicKey);
-        foreach (var kvp in _keyCache)
-        {
-            if (Convert.ToHexString(kvp.Value.EncryptionPublicKey) == senderKeyHex)
-            {
-                senderUsername = kvp.Key;
-                break;
-            }
-        }
+        _groupManager.TryAddKnownMember(group.GroupId, message.SenderPublicKey);
 
         var received = new ReceivedGroupMessage
         {
@@ -192,7 +291,7 @@ public sealed class ChatService : IAsyncDisposable
             GroupName = group.Name,
             MessageId = message.MessageId,
             SenderPublicKey = message.SenderPublicKey,
-            SenderUsername = senderUsername,
+            SenderUsername = ResolveSenderName(message.SenderPublicKey),
             Content = message.Content,
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(message.Timestamp),
             ReceivedAt = DateTimeOffset.UtcNow
@@ -204,6 +303,159 @@ public sealed class ChatService : IAsyncDisposable
         {
             await OnGroupMessageReceived(received).ConfigureAwait(false);
         }
+    }
+
+    private async Task HandleGroupMessageV2Async(EncryptedGroupMessageV2 encrypted, byte[]? sealedDistribution)
+    {
+        var group = _groupManager.GetGroup(encrypted.GroupId);
+        if (group == null)
+        {
+            _logger.LogDebug("Dropped group message for unknown group {GroupId}", encrypted.GroupId);
+            return;
+        }
+
+        if (sealedDistribution != null && AcceptSenderKeyDistribution(group, encrypted.SenderPublicKey, sealedDistribution))
+        {
+            await DrainPendingGroupMessagesAsync(group, encrypted.SenderPublicKey).ConfigureAwait(false);
+        }
+
+        if (encrypted.SenderPublicKey.SequenceEqual(LocalPublicKey))
+            return;
+
+        if (!await TryDeliverGroupV2Async(group, encrypted).ConfigureAwait(false))
+            BufferPendingGroupMessage(encrypted);
+    }
+
+    private bool AcceptSenderKeyDistribution(GroupInfo group, byte[] senderPublicKey, byte[] sealedDistribution)
+    {
+        GroupSenderKeyDistribution distribution;
+        try
+        {
+            distribution = GroupSenderKeyDistribution.OpenSealed(sealedDistribution, _encryptionKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to unseal group sender key for {GroupId}", group.GroupId);
+            return false;
+        }
+
+        if (distribution.GroupId != group.GroupId ||
+            !distribution.SenderPublicKey.SequenceEqual(senderPublicKey) ||
+            distribution.SenderPublicKey.SequenceEqual(LocalPublicKey) ||
+            !distribution.VerifySignature())
+        {
+            _logger.LogWarning("Rejected group sender key for {GroupId}: identity mismatch or bad signature",
+                group.GroupId);
+            return false;
+        }
+
+        _groupRatchet.AcceptDistribution(group, distribution);
+        CryptographicOperations.ZeroMemory(distribution.ChainKey);
+        _groupManager.TryAddKnownMember(group.GroupId, senderPublicKey);
+        return true;
+    }
+
+    private async Task<bool> TryDeliverGroupV2Async(GroupInfo group, EncryptedGroupMessageV2 encrypted)
+    {
+        var messageKey = _groupRatchet.TryTakeMessageKey(
+            group, encrypted.SenderPublicKey, encrypted.Generation, encrypted.Iteration, encrypted.KeyVersion);
+        if (messageKey == null)
+            return false;
+
+        GroupMessage message;
+        try
+        {
+            message = encrypted.Open(messageKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to decrypt group message for {GroupId}", encrypted.GroupId);
+            return true;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(messageKey);
+        }
+
+        if (!message.SenderPublicKey.SequenceEqual(encrypted.SenderPublicKey))
+        {
+            _logger.LogWarning("Group message {MessageId} rejected: sender mismatch", encrypted.MessageId);
+            return true;
+        }
+
+        if (!MessageReplayCache.IsTimestampFresh(message.Timestamp, GroupFreshness))
+        {
+            _logger.LogWarning("Group message {MessageId} rejected: stale timestamp", message.MessageId);
+            return true;
+        }
+
+        _groupManager.TryAddKnownMember(group.GroupId, message.SenderPublicKey);
+
+        var received = new ReceivedGroupMessage
+        {
+            GroupId = encrypted.GroupId,
+            GroupName = group.Name,
+            MessageId = message.MessageId,
+            SenderPublicKey = message.SenderPublicKey,
+            SenderUsername = ResolveSenderName(message.SenderPublicKey),
+            Content = message.Content,
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(message.Timestamp),
+            ReceivedAt = DateTimeOffset.UtcNow
+        };
+
+        _receivedGroupMessages[message.MessageId] = received;
+
+        if (OnGroupMessageReceived != null)
+            await OnGroupMessageReceived(received).ConfigureAwait(false);
+
+        return true;
+    }
+
+    private void BufferPendingGroupMessage(EncryptedGroupMessageV2 encrypted)
+    {
+        var key = PendingKey(encrypted.GroupId, encrypted.SenderPublicKey);
+        lock (_pendingGate)
+        {
+            if (!_pendingGroupV2.TryGetValue(key, out var pending))
+                _pendingGroupV2[key] = pending = new List<EncryptedGroupMessageV2>();
+            if (pending.Count >= MaxPendingGroupMessages)
+                pending.RemoveAt(0);
+            pending.Add(encrypted);
+        }
+    }
+
+    private async Task DrainPendingGroupMessagesAsync(GroupInfo group, byte[] senderPublicKey)
+    {
+        List<EncryptedGroupMessageV2>? pending;
+        lock (_pendingGate)
+        {
+            if (!_pendingGroupV2.Remove(PendingKey(group.GroupId, senderPublicKey), out pending))
+                return;
+        }
+
+        foreach (var encrypted in pending)
+        {
+            if (!await TryDeliverGroupV2Async(group, encrypted).ConfigureAwait(false))
+                BufferPendingGroupMessage(encrypted);
+        }
+    }
+
+    private static string PendingKey(Guid groupId, byte[] senderPublicKey)
+        => $"{groupId:N}:{Convert.ToHexString(senderPublicKey)}";
+
+    private string? ResolveSenderName(byte[] senderPublicKey)
+    {
+        var petname = Contacts?.FindByEncryptionKey(senderPublicKey)?.Petname;
+        if (petname != null)
+            return petname;
+
+        var senderKeyHex = Convert.ToHexString(senderPublicKey);
+        foreach (var kvp in _keyCache)
+        {
+            if (Convert.ToHexString(kvp.Value.EncryptionPublicKey) == senderKeyHex)
+                return kvp.Key;
+        }
+        return null;
     }
 
     private RoutingTable GetRoutingTable()
@@ -308,6 +560,17 @@ public sealed class ChatService : IAsyncDisposable
 
     public async Task<UserPublicKeyRecord?> GetPublicKeyAsync(string username)
     {
+        var contact = Contacts?.Find(username);
+        if (contact != null)
+        {
+            return new UserPublicKeyRecord
+            {
+                EncryptionPublicKey = contact.EncryptionPublicKey,
+                SigningPublicKey = contact.SigningPublicKey,
+                Timestamp = contact.AddedAt
+            };
+        }
+
         if (_keyCache.TryGetValue(username, out var cached))
         {
             return cached;
@@ -321,6 +584,106 @@ public sealed class ChatService : IAsyncDisposable
         }
 
         return record;
+    }
+
+    public Task<UserPublicKeyRecord?> LookupPublicKeyFreshAsync(string username)
+        => _dhtNode.LookupPublicKeyAsync(username);
+
+    public async Task<int> RotateGroupKeyAsync(Guid groupId)
+    {
+        var group = _groupManager.GetGroup(groupId)
+            ?? throw new InvalidOperationException("Group not found");
+
+        if (_signingKey == null)
+            throw new InvalidOperationException("Cannot rotate a group key without a signing key");
+
+        _groupManager.RotateKey(groupId);
+        return await DistributeGroupRekeyAsync(group).ConfigureAwait(false);
+    }
+
+    public async Task<int> KickMemberAsync(Guid groupId, byte[] memberPublicKey)
+    {
+        var group = _groupManager.GetGroup(groupId)
+            ?? throw new InvalidOperationException("Group not found");
+
+        if (!group.IsOwner)
+            throw new InvalidOperationException("Only the group owner can remove members");
+
+        if (_signingKey == null)
+            throw new InvalidOperationException("Cannot rotate a group key without a signing key");
+
+        _groupManager.RemoveMember(groupId, memberPublicKey);
+        _groupManager.RotateKey(groupId);
+        return await DistributeGroupRekeyAsync(group).ConfigureAwait(false);
+    }
+
+    private async Task<int> DistributeGroupRekeyAsync(GroupInfo group)
+    {
+        var delivered = 0;
+        foreach (var member in group.Members)
+        {
+            if (member.PublicKey.SequenceEqual(LocalPublicKey))
+                continue;
+
+            var path = _dhtNode.GetRandomNodesForPath(PathLength);
+            if (path.Count == 0)
+                continue;
+
+            try
+            {
+                var rekey = BuildRekeyFor(group, member.PublicKey);
+                var body = rekey.Serialize();
+                var envelope = new byte[1 + body.Length];
+                envelope[0] = MessageEnvelope.GroupRekey;
+                Buffer.BlockCopy(body, 0, envelope, 1, body.Length);
+
+                await _router.SendRawAsync(envelope, member.PublicKey, path).ConfigureAwait(false);
+                delivered++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to deliver group rekey to a member");
+            }
+        }
+
+        return delivered;
+    }
+
+    private GroupRekeyMessage BuildRekeyFor(GroupInfo group, byte[] memberPublicKey)
+    {
+        var rekey = new GroupRekeyMessage
+        {
+            GroupId = group.GroupId,
+            Wrapped = group.Key.WrapForMember(memberPublicKey),
+            Roster = group.Members.ToList(),
+            OwnerSigningPublicKey = LocalSigningPublicKey,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+        rekey.Signature = NSec.Cryptography.SignatureAlgorithm.Ed25519.Sign(
+            _signingKey!, rekey.GetSignableData());
+        return rekey;
+    }
+
+    private Task HandleGroupRekeyAsync(GroupRekeyMessage rekey)
+    {
+        if (!MessageReplayCache.IsTimestampFresh(rekey.Timestamp, RekeyFreshness))
+        {
+            _logger.LogWarning("Group rekey {MessageId} rejected: stale timestamp", rekey.MessageId);
+            return Task.CompletedTask;
+        }
+
+        var applied = _groupManager.ApplyRekey(rekey);
+        if (applied != null)
+        {
+            _logger.LogInformation("Group {GroupId} re-keyed to version {Version}",
+                applied.GroupId, applied.Key.Version);
+        }
+        else
+        {
+            _logger.LogDebug("Ignored group rekey {MessageId} for {GroupId}", rekey.MessageId, rekey.GroupId);
+        }
+
+        return Task.CompletedTask;
     }
 
     public IReadOnlyList<ReceivedMessage> GetMessages()
@@ -386,16 +749,7 @@ public sealed class ChatService : IAsyncDisposable
             content = message.Content;
         }
 
-        var senderKeyHex = Convert.ToHexString(message.SenderPublicKey);
-        string? senderUsername = null;
-        foreach (var kvp in _keyCache)
-        {
-            if (Convert.ToHexString(kvp.Value.EncryptionPublicKey) == senderKeyHex)
-            {
-                senderUsername = kvp.Key;
-                break;
-            }
-        }
+        var senderUsername = ResolveSenderName(message.SenderPublicKey);
 
         var received = new ReceivedMessage
         {
@@ -411,7 +765,7 @@ public sealed class ChatService : IAsyncDisposable
         _receivedMessages[message.MessageId] = received;
 
         _logger.LogInformation("Received message {MessageId} from {Sender}",
-            message.MessageId, senderUsername ?? senderKeyHex[..16]);
+            message.MessageId, senderUsername ?? Convert.ToHexString(message.SenderPublicKey)[..16]);
 
         if (OnMessageReceived != null)
         {
@@ -502,6 +856,9 @@ public sealed class ChatService : IAsyncDisposable
         _disposed = true;
         _groupManager.Dispose();
         _ratchet.Dispose();
+        _groupRatchet.Dispose();
+        if (_localStoreKey != null)
+            CryptographicOperations.ZeroMemory(_localStoreKey);
         await _connectionManager.DisposeAsync().ConfigureAwait(false);
         await _relayService.DisposeAsync().ConfigureAwait(false);
         await _dhtNode.DisposeAsync().ConfigureAwait(false);

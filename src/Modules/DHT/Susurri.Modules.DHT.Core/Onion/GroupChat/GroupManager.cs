@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using NSec.Cryptography;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.DHT.Core.Onion.GroupChat;
 
@@ -9,16 +10,23 @@ public sealed class GroupManager : IDisposable
     private readonly ConcurrentDictionary<Guid, GroupInfo> _groups = new();
     private readonly Key _encryptionKey;
     private readonly byte[] _publicKey;
+    private readonly byte[] _localSigningPublicKey;
+    private readonly byte[]? _storageKey;
     private readonly string _storagePath;
 
-    public GroupManager(Key encryptionKey)
+    public GroupManager(Key encryptionKey, byte[]? localStoreKey = null, byte[]? localSigningPublicKey = null, string? storagePath = null)
     {
         _encryptionKey = encryptionKey;
         _publicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        _localSigningPublicKey = localSigningPublicKey ?? Array.Empty<byte>();
+        _storageKey = localStoreKey != null
+            ? LocalEncryption.DeriveSubkey(localStoreKey, HkdfContexts.LocalGroups)
+            : null;
 
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        _storagePath = Path.Combine(appData, "Susurri", "groups");
+        _storagePath = storagePath ?? Path.Combine(appData, "Susurri", "groups");
         Directory.CreateDirectory(_storagePath);
+        LocalEncryption.RestrictDirectory(_storagePath);
 
         LoadGroups();
     }
@@ -33,6 +41,7 @@ public sealed class GroupManager : IDisposable
             Key = groupKey,
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             IsOwner = true,
+            OwnerSigningPublicKey = _localSigningPublicKey,
             Members = new List<GroupMember>
             {
                 new()
@@ -50,7 +59,7 @@ public sealed class GroupManager : IDisposable
         return info;
     }
 
-    public GroupInfo? JoinGroup(WrappedGroupKey wrappedKey, string name)
+    public GroupInfo? JoinGroup(WrappedGroupKey wrappedKey, string name, byte[]? ownerSigningPublicKey = null)
     {
         try
         {
@@ -63,6 +72,7 @@ public sealed class GroupManager : IDisposable
                 Key = groupKey,
                 CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 IsOwner = false,
+                OwnerSigningPublicKey = ownerSigningPublicKey ?? Array.Empty<byte>(),
                 Members = new List<GroupMember>
                 {
                     new()
@@ -85,15 +95,76 @@ public sealed class GroupManager : IDisposable
         }
     }
 
+    public GroupInfo? ApplyRekey(GroupRekeyMessage rekey)
+    {
+        if (!_groups.TryGetValue(rekey.GroupId, out var info))
+            return null;
+
+        if (info.IsOwner)
+            return null;
+
+        if (info.OwnerSigningPublicKey.Length == 0 ||
+            !rekey.OwnerSigningPublicKey.AsSpan().SequenceEqual(info.OwnerSigningPublicKey))
+            return null;
+
+        if (!rekey.VerifySignature())
+            return null;
+
+        GroupKey newKey;
+        try
+        {
+            newKey = GroupKey.UnwrapWithPrivateKey(rekey.Wrapped, _encryptionKey);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (newKey.Version <= info.Key.Version)
+            return null;
+
+        info.Key = newKey;
+        info.Members.Clear();
+        info.Members.AddRange(rekey.Roster);
+        if (!info.Members.Any(m => m.PublicKey.SequenceEqual(_publicKey)))
+        {
+            info.Members.Add(new GroupMember
+            {
+                PublicKey = _publicKey,
+                JoinedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Role = GroupRole.Member
+            });
+        }
+        SaveGroup(info);
+
+        return info;
+    }
+
+    public void TryAddKnownMember(Guid groupId, byte[] memberPublicKey)
+    {
+        if (!_groups.TryGetValue(groupId, out var info))
+            return;
+
+        if (memberPublicKey.Length != 32 ||
+            info.Members.Any(m => m.PublicKey.SequenceEqual(memberPublicKey)))
+            return;
+
+        info.Members.Add(new GroupMember
+        {
+            PublicKey = memberPublicKey,
+            JoinedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Role = GroupRole.Member
+        });
+
+        SaveGroup(info);
+    }
+
     public void LeaveGroup(Guid groupId)
     {
         if (_groups.TryRemove(groupId, out _))
         {
-            var filePath = GetGroupFilePath(groupId);
-            if (File.Exists(filePath))
-            {
-                File.Delete(filePath);
-            }
+            LocalEncryption.SecureDelete(GetGroupFilePath(groupId));
+            LocalEncryption.SecureDelete(GetEncryptedGroupFilePath(groupId));
         }
     }
 
@@ -159,13 +230,37 @@ public sealed class GroupManager : IDisposable
         if (!Directory.Exists(_storagePath))
             return;
 
+        if (_storageKey != null)
+        {
+            foreach (var file in Directory.GetFiles(_storagePath, "*.grpe"))
+            {
+                try
+                {
+                    var data = LocalEncryption.Decrypt(_storageKey, File.ReadAllBytes(file));
+                    var info = GroupInfo.Deserialize(data);
+                    _groups[info.GroupId] = info;
+                }
+                catch
+                {
+                }
+            }
+        }
+
         foreach (var file in Directory.GetFiles(_storagePath, "*.grp"))
         {
             try
             {
                 var data = File.ReadAllBytes(file);
                 var info = GroupInfo.Deserialize(data);
-                _groups[info.GroupId] = info;
+                if (_groups.TryAdd(info.GroupId, info))
+                {
+                    if (_storageKey != null)
+                        SaveGroup(info);
+                }
+                else if (_storageKey != null)
+                {
+                    LocalEncryption.SecureDelete(file);
+                }
             }
             catch
             {
@@ -175,12 +270,23 @@ public sealed class GroupManager : IDisposable
 
     private void SaveGroup(GroupInfo info)
     {
-        var filePath = GetGroupFilePath(info.GroupId);
-        File.WriteAllBytes(filePath, info.Serialize());
+        var data = info.Serialize();
+        if (_storageKey != null)
+        {
+            File.WriteAllBytes(GetEncryptedGroupFilePath(info.GroupId), LocalEncryption.Encrypt(_storageKey, data));
+            LocalEncryption.SecureDelete(GetGroupFilePath(info.GroupId));
+        }
+        else
+        {
+            File.WriteAllBytes(GetGroupFilePath(info.GroupId), data);
+        }
     }
 
     private string GetGroupFilePath(Guid groupId)
         => Path.Combine(_storagePath, $"{groupId:N}.grp");
+
+    private string GetEncryptedGroupFilePath(Guid groupId)
+        => Path.Combine(_storagePath, $"{groupId:N}.grpe");
 
     public void Dispose()
     {
@@ -195,6 +301,7 @@ public sealed class GroupInfo
     public GroupKey Key { get; set; } = null!;
     public long CreatedAt { get; init; }
     public bool IsOwner { get; init; }
+    public byte[] OwnerSigningPublicKey { get; init; } = Array.Empty<byte>();
     public List<GroupMember> Members { get; init; } = new();
 
     public byte[] Serialize()
@@ -218,6 +325,9 @@ public sealed class GroupInfo
             writer.Write(member.JoinedAt);
             writer.Write((byte)member.Role);
         }
+
+        writer.Write((byte)OwnerSigningPublicKey.Length);
+        writer.Write(OwnerSigningPublicKey);
 
         return ms.ToArray();
     }
@@ -252,6 +362,13 @@ public sealed class GroupInfo
             });
         }
 
+        var ownerSigningPublicKey = Array.Empty<byte>();
+        if (ms.Position < ms.Length)
+        {
+            var ownerKeyLen = reader.ReadByte();
+            ownerSigningPublicKey = reader.ReadBytes(ownerKeyLen);
+        }
+
         return new GroupInfo
         {
             GroupId = groupId,
@@ -259,6 +376,7 @@ public sealed class GroupInfo
             Key = key,
             CreatedAt = createdAt,
             IsOwner = isOwner,
+            OwnerSigningPublicKey = ownerSigningPublicKey,
             Members = members
         };
     }

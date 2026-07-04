@@ -9,7 +9,7 @@ public static class GroupInvite
 {
     private const int MaxWrappedKeySize = 64 * 1024;
 
-    public static string Encode(string groupName, WrappedGroupKey key)
+    public static string Encode(string groupName, WrappedGroupKey key, byte[]? ownerSigningPublicKey = null)
     {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
@@ -19,10 +19,14 @@ public static class GroupInvite
         writer.Write(keyBytes.Length);
         writer.Write(keyBytes);
 
+        var owner = ownerSigningPublicKey ?? Array.Empty<byte>();
+        writer.Write((byte)owner.Length);
+        writer.Write(owner);
+
         return Convert.ToBase64String(ms.ToArray());
     }
 
-    public static (string Name, WrappedGroupKey Key) Decode(string code)
+    public static (string Name, WrappedGroupKey Key, byte[] OwnerSigningPublicKey) Decode(string code)
     {
         var data = Convert.FromBase64String(code.Trim());
         using var ms = new MemoryStream(data);
@@ -34,6 +38,16 @@ public static class GroupInvite
             throw new InvalidDataException("Invalid invite code");
 
         var keyBytes = reader.ReadBytes(length);
-        return (name, WrappedGroupKey.Deserialize(keyBytes));
+
+        var owner = Array.Empty<byte>();
+        if (ms.Position < ms.Length)
+        {
+            var ownerLen = reader.ReadByte();
+            if (ownerLen != 0 && ownerLen != 32)
+                throw new InvalidDataException("Invalid invite code");
+            owner = reader.ReadBytes(ownerLen);
+        }
+
+        return (name, WrappedGroupKey.Deserialize(keyBytes), owner);
     }
 }

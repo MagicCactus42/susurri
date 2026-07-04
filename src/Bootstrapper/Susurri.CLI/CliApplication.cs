@@ -43,6 +43,9 @@ internal sealed class CliApplication : IAsyncDisposable
         registry.Register(new GenerateCommand(sp));
         registry.Register(new ClearCacheCommand(sp));
         registry.Register(new GroupCommand(session));
+        registry.Register(new ChatsCommand(session));
+        registry.Register(new ContactsCommand(session));
+        registry.Register(new HistoryCommand(session));
         registry.Register(new VersionCommand());
         registry.Register(new ClearScreenCommand());
         registry.Register(new ExitCommand());

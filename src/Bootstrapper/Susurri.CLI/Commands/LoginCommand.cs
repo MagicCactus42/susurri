@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Network;
 using Susurri.Modules.DHT.Core.Onion;
@@ -45,13 +46,12 @@ internal sealed class LoginCommand : ICommand
         if (!ValidateUsername(username) || !ValidatePassphrase(passphrase))
             return true;
 
-        ConsoleUi.PrintInfo("Deriving identity keys (PBKDF2, this takes a moment)...");
-
         try
         {
             var cryptoGen = _services.GetRequiredService<ICryptoKeyGenerator>();
             var salt = Identity.DeriveSalt(username);
-            var keyPair = cryptoGen.GenerateKeyPair(passphrase, salt);
+            var keyPair = await ConsoleUi.WithSpinnerAsync("deriving identity keys (PBKDF2, 600k rounds)",
+                () => Task.Run(() => cryptoGen.GenerateKeyPair(passphrase, salt))).ConfigureAwait(false);
 
             var config = _services.GetRequiredService<IConfiguration>();
             var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
@@ -67,26 +67,37 @@ internal sealed class LoginCommand : ICommand
                 loggerFactory.CreateLogger<RelayService>(),
                 loggerFactory.CreateLogger<ConnectionManager>(),
                 keyPair.SigningKey,
-                options);
+                options,
+                keyPair.LocalStoreKey);
 
             chat.OnMessageReceived += received =>
             {
-                ConsoleUi.PrintIncoming(received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16], received.Content);
+                if (!_session.TuiActive)
+                    ConsoleUi.PrintIncoming(received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16], received.Content);
                 return Task.CompletedTask;
             };
 
             chat.OnGroupMessageReceived += received =>
             {
-                var sender = received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16];
-                ConsoleUi.PrintIncoming($"{received.GroupName}/{sender}", received.Content);
+                if (!_session.TuiActive)
+                {
+                    var sender = received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16];
+                    ConsoleUi.PrintIncoming($"{received.GroupName}/{sender}", received.Content);
+                }
                 return Task.CompletedTask;
             };
+
+            var history = keyPair.LocalStoreKey != null
+                ? new HistoryStore(keyPair.LocalStoreKey, chat.LocalPublicKey)
+                : null;
+            var conversations = new ConversationStore(chat, username, history);
 
             var seeds = NodeConfig.Seeds(config, Array.Empty<string>())
                 .Select(e => $"{e.Address}:{e.Port}");
 
-            await chat.StartAsync(port, username, seeds).ConfigureAwait(false);
-            _session.SetChat(username, chat);
+            await ConsoleUi.WithSpinnerAsync("joining the network (dht bootstrap + onion setup)",
+                () => chat.StartAsync(port, username, seeds)).ConfigureAwait(false);
+            _session.SetChat(username, chat, conversations, history);
 
             if (wantsCache && !string.IsNullOrEmpty(cachePin))
             {
@@ -98,11 +109,18 @@ internal sealed class LoginCommand : ICommand
                 }
             }
 
-            ConsoleUi.PrintSuccess($"Online as '{username}'.");
-            ConsoleUi.PrintInfo($"  Listening on port {chat.LocalPort} (TCP + UDP)");
-            ConsoleUi.PrintInfo($"  Peers: {chat.PeerCount}");
+            Console.WriteLine();
+            ConsoleUi.Panel("online", new[]
+            {
+                ("user", username, Palette.Accent),
+                ("port", $"{chat.LocalPort} (tcp + udp)", Palette.Text),
+                ("peers", chat.PeerCount.ToString(), chat.PeerCount > 0 ? Palette.Green : Palette.Red),
+                ("history", history?.Enabled == true ? "on (encrypted)" : "off ('history on' to persist)", Palette.Text)
+            }, Palette.Green);
             if (chat.PeerCount == 0)
                 ConsoleUi.PrintWarning("No peers yet — set DHT:BootstrapNodes or pass a seed so you can reach others.");
+            else
+                Console.WriteLine($"  {ConsoleUi.Faint("try 'chats' for the full-screen browser")}");
         }
         catch (Exception ex)
         {

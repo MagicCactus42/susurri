@@ -1,4 +1,5 @@
 using System.Reflection;
+using Susurri.CLI.Tui;
 
 namespace Susurri.CLI.Commands;
 
@@ -11,9 +12,12 @@ internal sealed class VersionCommand : ICommand
     public Task<bool> ExecuteAsync(string[] args, CancellationToken ct)
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
-        Console.WriteLine($"  Susurri CLI v{version.Major}.{version.Minor}.{version.Build}");
-        Console.WriteLine($"  .NET Runtime: {Environment.Version}");
-        Console.WriteLine($"  Platform: {Environment.OSVersion}");
+        ConsoleUi.Panel("susurri", new[]
+        {
+            ("version", $"v{version.Major}.{version.Minor}.{version.Build}", Palette.Accent),
+            ("runtime", $".NET {Environment.Version}", Palette.Text),
+            ("platform", Environment.OSVersion.ToString(), Palette.Text)
+        });
         return Task.FromResult(true);
     }
 }

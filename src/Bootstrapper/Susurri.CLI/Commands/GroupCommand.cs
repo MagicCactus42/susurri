@@ -1,3 +1,4 @@
+using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Onion.GroupChat;
 
 namespace Susurri.CLI.Commands;
@@ -52,6 +53,12 @@ internal sealed class GroupCommand : ICommand
                 case "leave":
                     Leave(rest);
                     break;
+                case "rotate":
+                    await RotateAsync(rest).ConfigureAwait(false);
+                    break;
+                case "kick":
+                    await KickAsync(rest).ConfigureAwait(false);
+                    break;
                 case "send":
                     await SendAsync(rest).ConfigureAwait(false);
                     break;
@@ -97,11 +104,16 @@ internal sealed class GroupCommand : ICommand
         }
 
         Console.WriteLine();
-        ConsoleUi.PrintHeader($"=== Groups ({groups.Count}) ===");
+        ConsoleUi.PrintHeader($"groups · {groups.Count}");
         foreach (var g in groups)
         {
-            var role = g.IsOwner ? "owner" : "member";
-            Console.WriteLine($"  {g.GroupId}  {g.Name}  ({g.Members.Count} member(s), {role})");
+            var role = g.IsOwner
+                ? ConsoleUi.Color("owner", Palette.Yellow)
+                : ConsoleUi.Faint("member");
+            Console.WriteLine(
+                $"  {ConsoleUi.Color("◆", Palette.Mauve)} {ConsoleUi.Bold(g.Name)} " +
+                $"{ConsoleUi.Faint($"· {g.Members.Count} member(s) ·")} {role}");
+            Console.WriteLine($"    {ConsoleUi.Faint(g.GroupId.ToString())}");
         }
     }
 
@@ -129,7 +141,7 @@ internal sealed class GroupCommand : ICommand
         }
 
         var wrapped = _session.Chat.InviteMember(groupId, record.EncryptionPublicKey);
-        var code = GroupInvite.Encode(group.Name, wrapped);
+        var code = GroupInvite.Encode(group.Name, wrapped, group.OwnerSigningPublicKey);
 
         ConsoleUi.PrintSuccess($"Invited '{username}' to '{group.Name}'. Send them this invite code:");
         Console.WriteLine();
@@ -144,8 +156,8 @@ internal sealed class GroupCommand : ICommand
             return;
         }
 
-        var (name, key) = GroupInvite.Decode(args[0]);
-        var info = _session.Chat!.JoinGroup(key, name);
+        var (name, key, ownerSigningKey) = GroupInvite.Decode(args[0]);
+        var info = _session.Chat!.JoinGroup(key, name, ownerSigningKey);
         if (info == null)
         {
             ConsoleUi.PrintError("Could not join — the invite is not addressed to your identity.");
@@ -154,6 +166,8 @@ internal sealed class GroupCommand : ICommand
 
         ConsoleUi.PrintSuccess($"Joined group '{info.Name}'.");
         ConsoleUi.PrintInfo($"  Group ID: {info.GroupId}");
+        if (ownerSigningKey.Length == 0)
+            ConsoleUi.PrintWarning("Legacy invite without the owner's identity — automatic re-keys will be rejected; ask for a fresh invite.");
     }
 
     private void Leave(string[] args)
@@ -168,6 +182,109 @@ internal sealed class GroupCommand : ICommand
         ConsoleUi.PrintSuccess("Left the group.");
     }
 
+    private async Task RotateAsync(string[] args)
+    {
+        if (args.Length < 1 || !Guid.TryParse(args[0], out var groupId))
+        {
+            ConsoleUi.PrintInfo("Usage: group rotate <group-id>");
+            return;
+        }
+
+        var chat = _session.Chat!;
+        var group = chat.GetGroup(groupId);
+        if (group == null)
+        {
+            ConsoleUi.PrintError("Group not found.");
+            return;
+        }
+
+        if (!group.IsOwner)
+        {
+            ConsoleUi.PrintError("Only the group owner can rotate the key.");
+            return;
+        }
+
+        var others = group.Members.Count(m => !m.PublicKey.SequenceEqual(chat.LocalPublicKey));
+        var delivered = await ConsoleUi.WithSpinnerAsync("rotating and re-keying members in-band",
+            () => chat.RotateGroupKeyAsync(groupId)).ConfigureAwait(false);
+
+        ConsoleUi.PrintSuccess($"Rotated key for '{group.Name}' (version {group.Key.Version}).");
+        ConsoleUi.PrintInfo($"  Re-key delivered to {delivered}/{others} member(s); offline members receive it on next login.");
+    }
+
+    private async Task KickAsync(string[] args)
+    {
+        if (args.Length < 2 || !Guid.TryParse(args[0], out var groupId))
+        {
+            ConsoleUi.PrintInfo("Usage: group kick <group-id> <petname|username|key-prefix>");
+            return;
+        }
+
+        var chat = _session.Chat!;
+        var group = chat.GetGroup(groupId);
+        if (group == null)
+        {
+            ConsoleUi.PrintError("Group not found.");
+            return;
+        }
+
+        if (!group.IsOwner)
+        {
+            ConsoleUi.PrintError("Only the group owner can remove members.");
+            return;
+        }
+
+        var memberKey = await ResolveMemberAsync(group, args[1]).ConfigureAwait(false);
+        if (memberKey == null)
+        {
+            ConsoleUi.PrintError($"'{args[1]}' does not match any group member.");
+            return;
+        }
+
+        if (memberKey.SequenceEqual(chat.LocalPublicKey))
+        {
+            ConsoleUi.PrintError("You cannot kick yourself — use 'group leave'.");
+            return;
+        }
+
+        var remaining = group.Members.Count(m =>
+            !m.PublicKey.SequenceEqual(chat.LocalPublicKey) && !m.PublicKey.SequenceEqual(memberKey));
+        var delivered = await ConsoleUi.WithSpinnerAsync("removing member and re-keying the group",
+            () => chat.KickMemberAsync(groupId, memberKey)).ConfigureAwait(false);
+
+        ConsoleUi.PrintSuccess($"Removed the member and rotated '{group.Name}' to key version {group.Key.Version}.");
+        ConsoleUi.PrintInfo($"  Re-key delivered to {delivered}/{remaining} remaining member(s); the removed member is cut off.");
+    }
+
+    private async Task<byte[]?> ResolveMemberAsync(GroupInfo group, string target)
+    {
+        var chat = _session.Chat!;
+
+        var contact = chat.Contacts?.Find(target);
+        if (contact != null && IsMember(group, contact.EncryptionPublicKey))
+            return contact.EncryptionPublicKey;
+
+        var prefixMatch = group.Members.FirstOrDefault(m =>
+            Convert.ToHexString(m.PublicKey).StartsWith(target, StringComparison.OrdinalIgnoreCase));
+        if (prefixMatch != null)
+            return prefixMatch.PublicKey;
+
+        try
+        {
+            var record = await chat.GetPublicKeyAsync(target).ConfigureAwait(false);
+            if (record != null && IsMember(group, record.EncryptionPublicKey))
+                return record.EncryptionPublicKey;
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static bool IsMember(GroupInfo group, byte[] publicKey)
+        => group.Members.Any(m => m.PublicKey.SequenceEqual(publicKey));
+
     private async Task SendAsync(string[] args)
     {
         if (args.Length < 2 || !Guid.TryParse(args[0], out var groupId))
@@ -177,6 +294,14 @@ internal sealed class GroupCommand : ICommand
         }
 
         var content = string.Join(' ', args.Skip(1));
+
+        if (_session.Conversations is { } store)
+        {
+            await store.SendGroupAsync(groupId, content).ConfigureAwait(false);
+            ConsoleUi.PrintSuccess("Sent (see 'chats' for delivery status).");
+            return;
+        }
+
         var delivered = await _session.Chat!.SendGroupMessageAsync(groupId, content).ConfigureAwait(false);
         ConsoleUi.PrintSuccess($"Sent to {delivered} member(s).");
     }
@@ -201,7 +326,9 @@ internal sealed class GroupCommand : ICommand
         foreach (var m in messages)
         {
             var sender = m.SenderUsername ?? Convert.ToHexString(m.SenderPublicKey)[..16];
-            Console.WriteLine($"  [{m.ReceivedAt.LocalDateTime:HH:mm:ss}] «{sender}» {m.Content}");
+            Console.WriteLine(
+                $"  {ConsoleUi.Faint($"{m.ReceivedAt.LocalDateTime:HH:mm:ss}")} " +
+                $"{ConsoleUi.Color(ConsoleUi.Bold(sender), Palette.SenderColor(sender))} {m.Content}");
         }
     }
 
@@ -214,6 +341,8 @@ internal sealed class GroupCommand : ICommand
         Console.WriteLine("  group invite <group-id> <user>   - Invite a user (prints an invite code)");
         Console.WriteLine("  group join <invite-code>         - Join a group from an invite code");
         Console.WriteLine("  group leave <group-id>           - Leave a group");
+        Console.WriteLine("  group kick <group-id> <member>   - Remove a member and re-key (owner only)");
+        Console.WriteLine("  group rotate <group-id>          - Rotate the group key in-band (owner only)");
         Console.WriteLine("  group send <group-id> <message>  - Send a message to the group");
         Console.WriteLine("  group msgs <group-id>            - Show received group messages");
     }

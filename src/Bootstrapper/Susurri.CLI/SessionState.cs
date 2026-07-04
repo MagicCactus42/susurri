@@ -1,3 +1,4 @@
+using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Services;
 
@@ -14,18 +15,26 @@ internal sealed class SessionState : IAsyncDisposable
     public bool IsLoggedIn => CurrentUser != null && Chat != null;
 
     public ChatService? Chat { get; private set; }
+    public ConversationStore? Conversations { get; private set; }
+    public HistoryStore? History { get; private set; }
+    public volatile bool TuiActive;
 
     public KademliaDhtNode? DhtNode { get; private set; }
     public CancellationTokenSource? DhtCts { get; private set; }
 
-    public void SetChat(string username, ChatService chat)
+    public void SetChat(string username, ChatService chat, ConversationStore conversations, HistoryStore? history = null)
     {
         CurrentUser = username;
         Chat = chat;
+        Conversations = conversations;
+        History = history;
     }
 
     public async Task ClearChatAsync()
     {
+        Conversations?.Dispose();
+        Conversations = null;
+        History = null;
         if (Chat != null)
         {
             await Chat.DisposeAsync().ConfigureAwait(false);
@@ -49,6 +58,8 @@ internal sealed class SessionState : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Conversations?.Dispose();
+        Conversations = null;
         if (Chat != null)
         {
             await Chat.DisposeAsync().ConfigureAwait(false);

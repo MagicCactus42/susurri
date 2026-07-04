@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
+using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 
 namespace Susurri.CLI.Commands;
@@ -40,7 +41,6 @@ internal sealed class PingCommand : ICommand
         }
 
         var endpoint = new IPEndPoint(address, port);
-        ConsoleUi.PrintInfo($"Pinging {endpoint}...");
 
         var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
         var logger = loggerFactory.CreateLogger<KademliaDhtNode>();
@@ -52,11 +52,21 @@ internal sealed class PingCommand : ICommand
 
         try
         {
-            var alive = await probe.PingEndpointAsync(endpoint).ConfigureAwait(false);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var alive = await ConsoleUi.WithSpinnerAsync($"pinging {endpoint}",
+                () => probe.PingEndpointAsync(endpoint)).ConfigureAwait(false);
+            watch.Stop();
+
             if (alive)
-                ConsoleUi.PrintSuccess($"PONG from {endpoint}");
+            {
+                var ms = watch.ElapsedMilliseconds;
+                var rgb = ms < 100 ? Palette.Green : ms < 300 ? Palette.Yellow : Palette.Red;
+                ConsoleUi.PrintSuccess($"PONG from {endpoint} in {ConsoleUi.Color($"{ms} ms", rgb)}");
+            }
             else
+            {
                 ConsoleUi.PrintWarning("No response received.");
+            }
         }
         catch (Exception ex)
         {

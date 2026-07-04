@@ -1,3 +1,5 @@
+using Susurri.CLI.Tui;
+
 namespace Susurri.CLI.Commands;
 
 internal sealed class InboxCommand : ICommand
@@ -32,12 +34,16 @@ internal sealed class InboxCommand : ICommand
         }
 
         Console.WriteLine();
-        ConsoleUi.PrintHeader($"=== Inbox ({messages.Count}) ===");
+        ConsoleUi.PrintHeader($"inbox · {messages.Count}");
         foreach (var m in messages)
         {
             var sender = m.SenderUsername ?? Convert.ToHexString(m.SenderPublicKey)[..16];
-            Console.WriteLine($"  [{m.ReceivedAt.LocalDateTime:HH:mm:ss}] «{sender}» {m.Content}");
+            Console.WriteLine(
+                $"  {ConsoleUi.Faint($"{m.ReceivedAt.LocalDateTime:HH:mm:ss}")} " +
+                $"{ConsoleUi.Color(ConsoleUi.Bold(sender), Palette.SenderColor(sender))} {m.Content}");
         }
+        Console.WriteLine();
+        Console.WriteLine($"  {ConsoleUi.Faint("tip: 'chats' opens the full-screen browser")}");
 
         return Task.FromResult(true);
     }

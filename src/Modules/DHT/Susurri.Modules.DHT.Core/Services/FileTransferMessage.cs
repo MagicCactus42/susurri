@@ -12,6 +12,8 @@ public static class MessageEnvelope
 {
     public const byte FileTransfer = 0x02;
     public const byte GroupMessage = 0x03;
+    public const byte GroupMessageV2 = 0x04;
+    public const byte GroupRekey = 0x05;
 
     /// <summary>
     /// Returns true if the first byte of an unpadded payload indicates a file transfer message.
@@ -24,6 +26,12 @@ public static class MessageEnvelope
     /// </summary>
     public static bool IsGroupMessage(byte[] data) =>
         data.Length > 0 && data[0] == GroupMessage;
+
+    public static bool IsGroupMessageV2(byte[] data) =>
+        data.Length > 0 && data[0] == GroupMessageV2;
+
+    public static bool IsGroupRekey(byte[] data) =>
+        data.Length > 0 && data[0] == GroupRekey;
 }
 
 public enum FileMessageType : byte
