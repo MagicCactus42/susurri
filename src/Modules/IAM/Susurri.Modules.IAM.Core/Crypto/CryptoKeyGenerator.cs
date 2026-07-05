@@ -76,7 +76,7 @@ public sealed class CryptoKeyGenerator : ICryptoKeyGenerator
 
         var bip = new BIP39();
         var fullMnemonic = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
-        var allWords = fullMnemonic.Split(' ');
+        var allWords = fullMnemonic.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
         return string.Join(" ", allWords.Take(wordCount));
     }

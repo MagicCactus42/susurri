@@ -19,6 +19,7 @@ public sealed class OnionRouter
     private readonly Key _encryptionKey;
     private readonly KademliaDhtNode _dhtNode;
     private readonly ILogger<OnionRouter> _logger;
+    private readonly bool _allowLoopback;
     private readonly RateLimiter _rateLimiter = new(maxTokens: 30, refillRatePerSecond: 5.0);
     private readonly MessageReplayCache _replayCache = new();
     private static readonly TimeSpan TimestampFreshness = TimeSpan.FromMinutes(5);
@@ -36,13 +37,21 @@ public sealed class OnionRouter
 
     public event Func<Guid, Task>? OnAckReceived;
 
-    public OnionRouter(Key encryptionKey, KademliaDhtNode dhtNode, ILogger<OnionRouter> logger)
+    public OnionRouter(Key encryptionKey, KademliaDhtNode dhtNode, ILogger<OnionRouter> logger, bool allowLoopback = false)
     {
         _encryptionKey = encryptionKey;
         _dhtNode = dhtNode;
         _logger = logger;
+        _allowLoopback = allowLoopback;
         _dhtNode.OnMessageReceived += (_, payload, sender) => ProcessIncomingAsync(payload, sender);
     }
+
+    // A hop endpoint is deliverable if it is publicly routable, or — only when
+    // the node is started in local-test mode — a loopback address. The loopback
+    // escape hatch defaults off so production never relays to 127.0.0.1.
+    private bool IsHopAllowed(IPAddress address) =>
+        NetworkValidator.IsPubliclyRoutable(address) ||
+        (_allowLoopback && IPAddress.IsLoopback(address));
 
     public async Task ProcessIncomingAsync(byte[] wirePayload, IPEndPoint senderEndpoint)
     {
@@ -262,7 +271,7 @@ public sealed class OnionRouter
             return;
         }
 
-        if (TestSendOverride == null && !NetworkValidator.IsPubliclyRoutable(firstHopAddress))
+        if (TestSendOverride == null && !IsHopAllowed(firstHopAddress))
         {
             _logger.LogWarning("Blocked reply to non-routable address {Address}", firstHopAddress);
             return;
@@ -292,7 +301,7 @@ public sealed class OnionRouter
             return;
         }
 
-        if (TestSendOverride == null && !NetworkValidator.IsPubliclyRoutable(nextAddress))
+        if (TestSendOverride == null && !IsHopAllowed(nextAddress))
         {
             _logger.LogWarning("Blocked relay to non-routable address {Address}", nextAddress);
             return;
@@ -631,7 +640,7 @@ public sealed class OnionRouter
             return;
         }
 
-        if (TestSendOverride == null && !NetworkValidator.IsPubliclyRoutable(prevAddress))
+        if (TestSendOverride == null && !IsHopAllowed(prevAddress))
         {
             _logger.LogWarning("Blocked reply forward to non-routable address {Address}", prevAddress);
             return;

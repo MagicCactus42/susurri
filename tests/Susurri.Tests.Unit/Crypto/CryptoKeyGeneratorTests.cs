@@ -191,6 +191,14 @@ public class CryptoKeyGeneratorTests
     }
 
     [Fact]
+    public void GeneratePassphrase_Words_Are_Clean_Lowercase_Ascii()
+    {
+        var words = _sut.GeneratePassphrase(12).Split(' ');
+
+        words.ShouldAllBe(w => w.Length > 0 && w.All(char.IsAsciiLetterLower));
+    }
+
+    [Fact]
     public void GeneratePassphrase_TooFewWords_Throws()
     {
         Should.Throw<ArgumentException>(() => _sut.GeneratePassphrase(5));

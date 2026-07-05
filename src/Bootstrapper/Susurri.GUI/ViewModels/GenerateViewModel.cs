@@ -69,7 +69,8 @@ public class GenerateViewModel : ViewModelBase
             var entropyHex = Convert.ToHexString(entropy).ToLowerInvariant();
 
             var bip = new BIP39();
-            GeneratedPassphrase = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
+            GeneratedPassphrase = string.Join(" ", bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English)
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
             StatusMessage = $"Generated {WordCount}-word passphrase ({entropyBytes * 8} bits of entropy)";
             Copied = false;
         }

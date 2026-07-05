@@ -76,7 +76,7 @@ public sealed class ChatService : IAsyncDisposable
             useStun: options.UseStun,
             publicUdpEndpoint: options.PublicEndpoint,
             networkId: options.NetworkId);
-        _router = new OnionRouter(encryptionKey, _dhtNode, routerLogger);
+        _router = new OnionRouter(encryptionKey, _dhtNode, routerLogger, options.AllowLoopback);
 
         var routingTable = GetRoutingTable();
         _relayService = new RelayService(routingTable, relayLogger);
@@ -881,7 +881,8 @@ public sealed record ChatNodeOptions(
     bool EnableUdp = true,
     bool UseStun = false,
     uint NetworkId = Susurri.Modules.DHT.Core.Kademlia.Protocol.KademliaMessage.DefaultNetworkId,
-    System.Net.IPEndPoint? PublicEndpoint = null);
+    System.Net.IPEndPoint? PublicEndpoint = null,
+    bool AllowLoopback = false);
 
 public sealed record SendResult(bool Success, Guid? MessageId, string? Error);
 

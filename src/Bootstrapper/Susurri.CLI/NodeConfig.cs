@@ -22,7 +22,8 @@ internal static class NodeConfig
         EnableUdp: config.GetValue("DHT:Nat:Enabled", true),
         UseStun: config.GetValue("DHT:Nat:UseStun", false),
         NetworkId: NetworkId(config),
-        PublicEndpoint: ParseEndpoint(config["DHT:Nat:PublicEndpoint"]));
+        PublicEndpoint: ParseEndpoint(config["DHT:Nat:PublicEndpoint"]),
+        AllowLoopback: config.GetValue("DHT:AllowLoopback", false));
 
     public static List<IPEndPoint> Seeds(IConfiguration config, IEnumerable<string> extra)
     {

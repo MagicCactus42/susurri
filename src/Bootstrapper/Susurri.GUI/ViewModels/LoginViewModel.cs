@@ -154,7 +154,8 @@ public class LoginViewModel : ViewModelBase
             var entropyHex = Convert.ToHexString(entropy).ToLowerInvariant();
 
             var bip = new BIP39();
-            GeneratedPassphrase = bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English);
+            GeneratedPassphrase = string.Join(" ", bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English)
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         }
         catch (Exception ex)
         {

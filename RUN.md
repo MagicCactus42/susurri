@@ -49,6 +49,24 @@ status                            # shows "Peers: 1"
 exit
 ```
 
+> **Testing message delivery on one machine.** Onion relays refuse to forward to
+> non-routable addresses (an anti-SSRF control), so on a loopback-only cluster a
+> relayed message is silently dropped and never reaches the recipient. To run a
+> real multi-user test against `127.0.0.1`, start every node with
+> `DHT__AllowLoopback=true` (config key `DHT:AllowLoopback`). It defaults to
+> **false** so production never relays to loopback — only flip it for local dev:
+>
+> ```bash
+> DHT__AllowLoopback=true DHT__BootstrapNodes__0=127.0.0.1:7070 ./dist/susurri-cli   # alice
+> DHT__AllowLoopback=true DHT__BootstrapNodes__0=127.0.0.1:7070 ./dist/susurri-cli   # bob
+> ```
+>
+> You need enough peers for a 3-hop route — run the seed plus **at least 3**
+> logged-in nodes before `send` will route. Note the bootstrap seed itself is
+> **not** an onion relay (it never logs in, so it has no router); if a path
+> happens to include it the message is dropped, so keep several logged-in peers
+> online and resend if needed. See KNOWN-LIMITATIONS.md §1.9.
+
 Or non-interactively:
 
 ```bash

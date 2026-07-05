@@ -40,6 +40,26 @@ already done.
 - **Target:** **Phase 6 follow-up** — leave-notification message so departures
   trigger rotation, and evaluate MLS/TreeKEM if groups need to scale.
 
+### 1.9 Onion relay selection can pick non-relay peers
+- **What:** `GetRandomNodesForPath` draws relays from the whole routing table,
+  which also contains **DHT-only nodes** — bootstrap seeds (`--bootstrap`) and
+  headless `dht start` nodes never log in, so they have no `OnionRouter` and
+  silently drop any onion frame they're asked to relay. When such a node lands
+  in a 3-hop path, that message is black-holed (delivery is fire-and-forget;
+  there's no relay-failure retry). The odds shrink as the online-user count
+  grows relative to the number of seeds, but on a tiny network (e.g. one seed +
+  two users) it bites often.
+- **Why deferred:** the protocol has no capability bit advertising "I relay
+  onion traffic," so a node can't currently tell relay-capable peers from
+  DHT-only ones at path-selection time.
+- **Target:** **Phase 6** — advertise an onion-relay capability flag in the
+  DHT record / PONG and filter `GetRandomNodesForPath` to capable peers; short
+  term, exclude configured bootstrap endpoints from relay selection.
+- **Local-test impact:** to test delivery on one machine you need the seed
+  **plus ≥3 logged-in peers**, and even then a path may occasionally include the
+  seed and drop — resend, or run more logged-in peers. The deterministic proof
+  lives in `LocalChatDeliveryTests` (5 full nodes, no seed in the mesh).
+
 ---
 
 ## Phase 2 deferrals
