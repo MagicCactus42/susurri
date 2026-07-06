@@ -7,10 +7,13 @@ public abstract class KademliaMessage
     private const int MaxNodesPerResponse = 20;
     protected const int PublicKeySize = 32;
 
+    public const uint DefaultNetworkId = 0x53555352; // "SUSR"
+
     public Guid MessageId { get; init; } = Guid.NewGuid();
     public KademliaId SenderId { get; init; }
     public byte[] SenderPublicKey { get; init; } = Array.Empty<byte>();
     public int SenderPort { get; set; }
+    public uint NetworkId { get; set; } = DefaultNetworkId;
     public abstract MessageType Type { get; }
 
     public byte[] Serialize()
@@ -19,6 +22,7 @@ public abstract class KademliaMessage
         using var writer = new BinaryWriter(ms);
 
         writer.Write((byte)Type);
+        writer.Write(NetworkId);
         writer.Write(MessageId.ToByteArray());
         writer.Write(SenderId.Bytes);
         writer.Write((ushort)SenderPort);
@@ -33,13 +37,14 @@ public abstract class KademliaMessage
 
     public static KademliaMessage Deserialize(byte[] data)
     {
-        if (data == null || data.Length < 52)
+        if (data == null || data.Length < 56)
             throw new InvalidDataException("Message data too short");
 
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);
 
         var type = (MessageType)reader.ReadByte();
+        var networkId = reader.ReadUInt32();
         var messageId = new Guid(reader.ReadBytes(16));
         var senderId = KademliaId.FromBytes(reader.ReadBytes(32));
         var senderPort = reader.ReadUInt16();
@@ -70,6 +75,7 @@ public abstract class KademliaMessage
         };
 
         message.SenderPort = senderPort;
+        message.NetworkId = networkId;
         return message;
     }
 

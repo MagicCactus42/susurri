@@ -152,9 +152,9 @@ public class RobustnessPropertyTests
     public void KademliaMessage_Rejects_All_Unknown_Type_Tags()
     {
         // Build a header that's the right shape but with an out-of-range type.
-        // 1 byte type + 16 byte messageId + 32 byte senderId + 2 byte senderPort
-        // + 1 byte pubkey-len + 0 byte pubkey = 52 bytes (the deserializer's
-        // minimum-size guard).
+        // 1 byte type + 4 byte networkId + 16 byte messageId + 32 byte senderId
+        // + 2 byte senderPort + 1 byte pubkey-len + 0 byte pubkey = 56 bytes
+        // (the deserializer's minimum-size guard).
         for (int t = 0; t < 256; t++)
         {
             var tag = (byte)t;
@@ -162,9 +162,9 @@ public class RobustnessPropertyTests
             if (Enum.IsDefined(typeof(MessageType), tag))
                 continue;
 
-            var header = new byte[52];
+            var header = new byte[56];
             header[0] = tag;
-            // pubKeyLen byte at offset 51 stays 0 (no pubkey bytes follow).
+            // pubKeyLen byte at offset 55 stays 0 (no pubkey bytes follow).
 
             try
             {

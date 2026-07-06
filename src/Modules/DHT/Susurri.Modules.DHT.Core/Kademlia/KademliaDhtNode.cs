@@ -27,6 +27,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     private readonly HolePunchCoordinator _holePunch;
     private readonly UdpEndpoint? _udp;
     private readonly bool _useStun;
+    private readonly uint _networkId;
     private readonly ConcurrentDictionary<KademliaId, IPEndPoint> _punchedEndpoints = new();
     private bool _disposed;
 
@@ -64,7 +65,8 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         NatTraversalService? natTraversal = null,
         bool enableUdpTransport = false,
         bool useStun = false,
-        IPEndPoint? publicUdpEndpoint = null)
+        IPEndPoint? publicUdpEndpoint = null,
+        uint networkId = KademliaMessage.DefaultNetworkId)
     {
         EncryptionKey = encryptionKey;
         EncryptionPublicKey = encryptionKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
@@ -76,6 +78,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         _storage = new DhtStorage();
         _natTraversal = natTraversal;
         _useStun = useStun;
+        _networkId = networkId;
         _udp = enableUdpTransport ? new UdpEndpoint(logger) : null;
         PublicUdpEndPoint = publicUdpEndpoint;
         _backgroundTasks = new BackgroundTaskRunner(logger);
@@ -106,6 +109,12 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     }
 
     private static string FormatEndpoint(IPEndPoint endpoint) => $"{endpoint.Address}:{endpoint.Port}";
+
+    private void StampOutgoing(KademliaMessage message)
+    {
+        message.SenderPort = LocalPort;
+        message.NetworkId = _networkId;
+    }
 
     public async Task StartAsync(int port)
     {
@@ -168,6 +177,12 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
             var message = KademliaMessage.Deserialize(data);
 
+            if (message.NetworkId != _networkId)
+            {
+                _logger.LogDebug("Dropped message from foreign network {NetworkId:X8}", message.NetworkId);
+                return;
+            }
+
             SusurriMetrics.DhtMessagesIn.Add(1, new KeyValuePair<string, object?>("type", message.GetType().Name));
 
             if (!_replayCache.TryRecord(message.MessageId))
@@ -185,7 +200,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
             if (response != null && _udp != null)
             {
-                response.SenderPort = LocalPort;
+                StampOutgoing(response);
                 await _udp.SendReliableAsync(sender, response.Serialize()).ConfigureAwait(false);
             }
         }
@@ -503,6 +518,12 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
             var message = KademliaMessage.Deserialize(data);
 
+            if (message.NetworkId != _networkId)
+            {
+                _logger.LogDebug("Dropped message from foreign network {NetworkId:X8}", message.NetworkId);
+                return;
+            }
+
             SusurriMetrics.DhtMessagesIn.Add(1, new KeyValuePair<string, object?>("type", message.GetType().Name));
 
             if (!_replayCache.TryRecord(message.MessageId))
@@ -531,7 +552,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             if (response != null)
             {
                 using var writer = new BinaryWriter(stream);
-                response.SenderPort = LocalPort;
+                StampOutgoing(response);
                 var responseData = response.Serialize();
                 writer.Write(responseData.Length);
                 writer.Write(responseData);
@@ -779,7 +800,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
 
         if (_udp != null)
         {
-            wrapper.SenderPort = LocalPort;
+            StampOutgoing(wrapper);
             if (await _udp.SendReliableAsync(endpoint, wrapper.Serialize()).ConfigureAwait(false))
                 return;
         }
@@ -798,7 +819,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             using var stream = client.GetStream();
             using var writer = new BinaryWriter(stream);
 
-            message.SenderPort = LocalPort;
+            StampOutgoing(message);
             var data = message.Serialize();
             writer.Write(data.Length);
             writer.Write(data);
@@ -988,7 +1009,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         _pendingRequests[request.MessageId] = tcs;
         try
         {
-            request.SenderPort = LocalPort;
+            StampOutgoing(request);
             var data = request.Serialize();
 
             var acked = await _udp!.SendReliableAsync(endpoint, data).ConfigureAwait(false);
@@ -1028,7 +1049,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             using var stream = client.GetStream();
             using var writer = new BinaryWriter(stream);
 
-            request.SenderPort = LocalPort;
+            StampOutgoing(request);
             var data = request.Serialize();
             writer.Write(data.Length);
             writer.Write(data);

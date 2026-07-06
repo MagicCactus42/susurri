@@ -109,6 +109,48 @@ public class UdpTransportTests
         results.ShouldAllBe(r => r);
     }
 
+    [Fact]
+    public async Task Nodes_On_Different_Networks_Do_Not_Connect()
+    {
+        var keysA = NodeKeyMaterial.Create(false);
+        var keysB = NodeKeyMaterial.Create(false);
+
+        await using var a = new KademliaDhtNode(keysA.Encryption, NullLogger<KademliaDhtNode>.Instance,
+            keysA.Signing, enableUdpTransport: true, networkId: 0x11111111);
+        await using var b = new KademliaDhtNode(keysB.Encryption, NullLogger<KademliaDhtNode>.Instance,
+            keysB.Signing, enableUdpTransport: true, networkId: 0x22222222);
+
+        await a.StartAsync(0);
+        await b.StartAsync(0);
+
+        // A tries to join B, but B belongs to a different network and drops A's
+        // messages, so neither learns the other.
+        await a.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, b.LocalPort) });
+
+        a.KnownNodes.ShouldBe(0);
+        b.KnownNodes.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Nodes_On_Same_Network_Connect()
+    {
+        var keysA = NodeKeyMaterial.Create(false);
+        var keysB = NodeKeyMaterial.Create(false);
+
+        await using var a = new KademliaDhtNode(keysA.Encryption, NullLogger<KademliaDhtNode>.Instance,
+            keysA.Signing, enableUdpTransport: true, networkId: 0x33333333);
+        await using var b = new KademliaDhtNode(keysB.Encryption, NullLogger<KademliaDhtNode>.Instance,
+            keysB.Signing, enableUdpTransport: true, networkId: 0x33333333);
+
+        await a.StartAsync(0);
+        await b.StartAsync(0);
+
+        await a.BootstrapAsync(new[] { new IPEndPoint(IPAddress.Loopback, b.LocalPort) });
+
+        a.KnownNodes.ShouldBeGreaterThanOrEqualTo(1);
+        b.KnownNodes.ShouldBeGreaterThanOrEqualTo(1);
+    }
+
     private static void SeedPublicEndpoint(KademliaDhtNode node) =>
         node.SetPublicUdpEndpoint(new IPEndPoint(IPAddress.Loopback, node.LocalPort));
 

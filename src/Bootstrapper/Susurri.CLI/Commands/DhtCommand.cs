@@ -85,6 +85,7 @@ internal sealed class DhtCommand : ICommand
             var udpEnabled = config.GetValue("DHT:Nat:Enabled", true);
             var useStun = config.GetValue("DHT:Nat:UseStun", false);
             var publicEndpoint = ParseEndpoint(config["DHT:Nat:PublicEndpoint"] ?? string.Empty);
+            var networkId = ParseNetworkId(config["DHT:NetworkId"]);
 
             var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
@@ -93,7 +94,7 @@ internal sealed class DhtCommand : ICommand
 
             var node = new KademliaDhtNode(encryptionKey, logger, signingKey,
                 natTraversal: null, enableUdpTransport: udpEnabled, useStun: useStun,
-                publicUdpEndpoint: publicEndpoint);
+                publicUdpEndpoint: publicEndpoint, networkId: networkId);
             var cts = new CancellationTokenSource();
 
             await node.StartAsync(port).ConfigureAwait(false);
@@ -145,6 +146,24 @@ internal sealed class DhtCommand : ICommand
             ConsoleUi.PrintInfo($"  Node ID: {_session.DhtNode.LocalId.ToString()[..16]}");
             ConsoleUi.PrintInfo($"  Peers:   {_session.DhtNode.KnownNodes}");
         }
+    }
+
+    private static uint ParseNetworkId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Susurri.Modules.DHT.Core.Kademlia.Protocol.KademliaMessage.DefaultNetworkId;
+
+        var text = value.Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            uint.TryParse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out var hex))
+            return hex;
+
+        if (uint.TryParse(text, out var dec))
+            return dec;
+
+        // Fall back to a stable id derived from the network name.
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
+        return System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash);
     }
 
     private static IPEndPoint? ParseEndpoint(string endpoint)
