@@ -35,6 +35,8 @@ internal sealed class CliApplication : IAsyncDisposable
 
         registry.Register(new LoginCommand(sp, session));
         registry.Register(new LogoutCommand(session));
+        registry.Register(new SendCommand(session));
+        registry.Register(new InboxCommand(session));
         registry.Register(new StatusCommand(session));
         registry.Register(new DhtCommand(sp, session));
         registry.Register(new PingCommand(sp));

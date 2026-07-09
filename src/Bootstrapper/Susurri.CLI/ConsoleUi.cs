@@ -68,4 +68,13 @@ internal static class ConsoleUi
         Console.WriteLine($"  {text}");
         Console.ResetColor();
     }
+
+    public static void PrintIncoming(string sender, string content)
+    {
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Magenta;
+        Console.Write($"  «{sender}» ");
+        Console.ResetColor();
+        Console.WriteLine(content);
+    }
 }

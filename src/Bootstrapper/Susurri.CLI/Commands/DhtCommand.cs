@@ -68,11 +68,15 @@ internal sealed class DhtCommand : ICommand
             return;
         }
 
-        var port = 7070;
+        var config = _services.GetRequiredService<IConfiguration>();
+
+        var port = config.GetValue("DHT:DefaultPort", 7070);
         if (args.Length > 0 && int.TryParse(args[0], out var customPort))
             port = customPort;
 
-        var seeds = args.Skip(1).Select(ParseEndpoint).Where(e => e != null).Select(e => e!).ToList();
+        // Seeds come from both the CLI args and DHT:BootstrapNodes in config, so a
+        // node can be pointed at a network by configuration alone.
+        var seeds = NodeConfig.Seeds(config, args.Skip(1));
 
         ConsoleUi.PrintInfo($"Starting DHT node on port {port}...");
 
@@ -80,12 +84,11 @@ internal sealed class DhtCommand : ICommand
         {
             var loggerFactory = _services.GetRequiredService<ILoggerFactory>();
             var logger = loggerFactory.CreateLogger<KademliaDhtNode>();
-            var config = _services.GetRequiredService<IConfiguration>();
 
             var udpEnabled = config.GetValue("DHT:Nat:Enabled", true);
             var useStun = config.GetValue("DHT:Nat:UseStun", false);
-            var publicEndpoint = ParseEndpoint(config["DHT:Nat:PublicEndpoint"] ?? string.Empty);
-            var networkId = ParseNetworkId(config["DHT:NetworkId"]);
+            var publicEndpoint = NodeConfig.ParseEndpoint(config["DHT:Nat:PublicEndpoint"]);
+            var networkId = NodeConfig.NetworkId(config);
 
             var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
                 new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
@@ -146,36 +149,6 @@ internal sealed class DhtCommand : ICommand
             ConsoleUi.PrintInfo($"  Node ID: {_session.DhtNode.LocalId.ToString()[..16]}");
             ConsoleUi.PrintInfo($"  Peers:   {_session.DhtNode.KnownNodes}");
         }
-    }
-
-    private static uint ParseNetworkId(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return Susurri.Modules.DHT.Core.Kademlia.Protocol.KademliaMessage.DefaultNetworkId;
-
-        var text = value.Trim();
-        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
-            uint.TryParse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out var hex))
-            return hex;
-
-        if (uint.TryParse(text, out var dec))
-            return dec;
-
-        // Fall back to a stable id derived from the network name.
-        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
-        return System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash);
-    }
-
-    private static IPEndPoint? ParseEndpoint(string endpoint)
-    {
-        var parts = endpoint.Split(':');
-        if (parts.Length == 2 &&
-            IPAddress.TryParse(parts[0], out var ip) &&
-            int.TryParse(parts[1], out var port))
-        {
-            return new IPEndPoint(ip, port);
-        }
-        return null;
     }
 
     private static void PrintHelp()

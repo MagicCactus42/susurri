@@ -19,10 +19,17 @@ internal sealed class StatusCommand : ICommand
         ConsoleUi.PrintHeader("=== Susurri Status ===");
         Console.WriteLine();
 
-        if (_session.IsLoggedIn)
-            ConsoleUi.PrintInfo($"User:     {_session.CurrentUser} (logged in)");
+        if (_session.Chat != null)
+        {
+            ConsoleUi.PrintInfo($"User:     {_session.CurrentUser} (online)");
+            ConsoleUi.PrintInfo($"  Port:   {_session.Chat.LocalPort} (TCP + UDP)");
+            ConsoleUi.PrintInfo($"  Peers:  {_session.Chat.PeerCount}");
+            ConsoleUi.PrintInfo($"  Inbox:  {_session.Chat.GetMessages().Count} message(s)");
+        }
         else
+        {
             ConsoleUi.PrintInfo("User:     Not logged in");
+        }
 
         if (_session.DhtNode == null)
         {

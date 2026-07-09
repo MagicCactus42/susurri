@@ -34,6 +34,7 @@ public sealed class ChatService : IAsyncDisposable
     public bool IsConnected => _dhtNode.IsRunning;
     public int PeerCount => _dhtNode.KnownNodes;
     public int ActiveRelays => _relayService.ActiveCircuits;
+    public int LocalPort => _dhtNode.LocalPort;
 
     public ChatService(
         Key encryptionKey,
@@ -42,12 +43,20 @@ public sealed class ChatService : IAsyncDisposable
         ILogger<OnionRouter> routerLogger,
         ILogger<RelayService> relayLogger,
         ILogger<ConnectionManager> connectionLogger,
-        Key? signingKey = null)
+        Key? signingKey = null,
+        ChatNodeOptions? nodeOptions = null)
     {
+        var options = nodeOptions ?? new ChatNodeOptions();
         _encryptionKey = encryptionKey;
         _signingKey = signingKey;
         _logger = chatLogger;
-        _dhtNode = new KademliaDhtNode(encryptionKey, dhtLogger, signingKey);
+        _dhtNode = new KademliaDhtNode(
+            encryptionKey, dhtLogger, signingKey,
+            natTraversal: null,
+            enableUdpTransport: options.EnableUdp,
+            useStun: options.UseStun,
+            publicUdpEndpoint: options.PublicEndpoint,
+            networkId: options.NetworkId);
         _router = new OnionRouter(encryptionKey, _dhtNode, routerLogger);
 
         var routingTable = GetRoutingTable();
@@ -332,6 +341,12 @@ public sealed class ChatService : IAsyncDisposable
         await _dhtNode.DisposeAsync().ConfigureAwait(false);
     }
 }
+
+public sealed record ChatNodeOptions(
+    bool EnableUdp = true,
+    bool UseStun = false,
+    uint NetworkId = Susurri.Modules.DHT.Core.Kademlia.Protocol.KademliaMessage.DefaultNetworkId,
+    System.Net.IPEndPoint? PublicEndpoint = null);
 
 public sealed record SendResult(bool Success, Guid? MessageId, string? Error);
 

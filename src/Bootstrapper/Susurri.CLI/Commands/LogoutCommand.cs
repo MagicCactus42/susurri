@@ -13,16 +13,17 @@ internal sealed class LogoutCommand : ICommand
         _session = session;
     }
 
-    public Task<bool> ExecuteAsync(string[] args, CancellationToken ct)
+    public async Task<bool> ExecuteAsync(string[] args, CancellationToken ct)
     {
         if (!_session.IsLoggedIn)
         {
             ConsoleUi.PrintWarning("Not logged in.");
-            return Task.FromResult(true);
+            return true;
         }
 
-        _session.SetLoggedOut();
+        ConsoleUi.PrintInfo("Going offline...");
+        await _session.ClearChatAsync().ConfigureAwait(false);
         ConsoleUi.PrintSuccess("Logged out.");
-        return Task.FromResult(true);
+        return true;
     }
 }

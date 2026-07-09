@@ -1,26 +1,36 @@
 using Susurri.Modules.DHT.Core.Kademlia;
+using Susurri.Modules.DHT.Core.Services;
 
 namespace Susurri.CLI;
 
 /// <summary>
-/// Mutable per-CLI-process session: login identity and the running DHT node.
-/// Replaces the static fields previously living on Program.cs.
+/// Mutable per-CLI-process session: the logged-in chat identity (a running
+/// <see cref="ChatService"/>) and/or a headless DHT node started via
+/// <c>dht start</c>.
 /// </summary>
 internal sealed class SessionState : IAsyncDisposable
 {
     public string? CurrentUser { get; private set; }
-    public bool IsLoggedIn => CurrentUser != null;
+    public bool IsLoggedIn => CurrentUser != null && Chat != null;
+
+    public ChatService? Chat { get; private set; }
 
     public KademliaDhtNode? DhtNode { get; private set; }
     public CancellationTokenSource? DhtCts { get; private set; }
 
-    public void SetLoggedIn(string username)
+    public void SetChat(string username, ChatService chat)
     {
         CurrentUser = username;
+        Chat = chat;
     }
 
-    public void SetLoggedOut()
+    public async Task ClearChatAsync()
     {
+        if (Chat != null)
+        {
+            await Chat.DisposeAsync().ConfigureAwait(false);
+            Chat = null;
+        }
         CurrentUser = null;
     }
 
@@ -39,6 +49,13 @@ internal sealed class SessionState : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Chat != null)
+        {
+            await Chat.DisposeAsync().ConfigureAwait(false);
+            Chat = null;
+            CurrentUser = null;
+        }
+
         if (DhtNode != null)
         {
             DhtCts?.Cancel();
