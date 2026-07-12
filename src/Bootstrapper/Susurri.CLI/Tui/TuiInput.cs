@@ -13,6 +13,8 @@ internal sealed record MouseWheelEvent(int X, int Y, int Delta) : TuiEvent;
 
 internal sealed record RefreshEvent : TuiEvent;
 
+internal sealed record InputClosedEvent : TuiEvent;
+
 internal sealed class TuiInput : IDisposable
 {
     private readonly Channel<TuiEvent> _events = Channel.CreateUnbounded<TuiEvent>();
@@ -31,22 +33,29 @@ internal sealed class TuiInput : IDisposable
 
     private void ReadLoop()
     {
-        while (!_cts.IsCancellationRequested)
+        try
         {
-            if (!Console.KeyAvailable)
+            while (!_cts.IsCancellationRequested)
             {
-                Thread.Sleep(15);
-                continue;
-            }
+                if (!Console.KeyAvailable)
+                {
+                    Thread.Sleep(15);
+                    continue;
+                }
 
-            var key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Escape && Console.KeyAvailable)
-            {
-                HandleEscapeSequence();
-                continue;
-            }
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Escape && Console.KeyAvailable)
+                {
+                    HandleEscapeSequence();
+                    continue;
+                }
 
-            _events.Writer.TryWrite(new KeyEvent(key));
+                _events.Writer.TryWrite(new KeyEvent(key));
+            }
+        }
+        catch
+        {
+            _events.Writer.TryWrite(new InputClosedEvent());
         }
     }
 

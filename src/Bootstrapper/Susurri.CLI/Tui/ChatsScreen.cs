@@ -103,6 +103,8 @@ internal sealed class ChatsScreen
             case MouseWheelEvent wheel:
                 HandleWheel(wheel);
                 return true;
+            case InputClosedEvent:
+                return false;
             case KeyEvent key:
                 return _mode switch
                 {

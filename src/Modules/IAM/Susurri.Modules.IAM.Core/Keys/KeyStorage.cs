@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using NSec.Cryptography;
 using Susurri.Modules.IAM.Core.Abstractions;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.IAM.Core.Keys;
 
@@ -21,7 +22,7 @@ public class KeyStorage : IKeyStorage
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         _directory = Path.Combine(appData, "Susurri");
         Directory.CreateDirectory(_directory);
-        SetSecureDirectoryPermissions(_directory);
+        LocalEncryption.RestrictDirectory(_directory);
         _filePath = Path.Combine(_directory, "keys.enc");
     }
 
@@ -162,19 +163,5 @@ public class KeyStorage : IKeyStorage
 
         if (passphrase.Length < 8)
             throw new ArgumentException("Passphrase must be at least 8 characters", nameof(passphrase));
-    }
-
-    private static void SetSecureDirectoryPermissions(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            try
-            {
-                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-            catch
-            {
-            }
-        }
     }
 }

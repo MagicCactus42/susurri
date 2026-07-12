@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Susurri.Modules.IAM.Core.Abstractions;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.IAM.Core.Keys;
 
@@ -49,7 +50,7 @@ internal sealed class CredentialsCache : ICredentialsCache
 
             var directory = Path.GetDirectoryName(CachePath)!;
             Directory.CreateDirectory(directory);
-            SetSecureDirectoryPermissions(directory);
+            LocalEncryption.RestrictDirectory(directory);
 
             await File.WriteAllBytesAsync(CachePath, payload).ConfigureAwait(false);
 
@@ -161,19 +162,5 @@ internal sealed class CredentialsCache : ICredentialsCache
 
         if (username.Contains('\n') || username.Contains('\r'))
             throw new ArgumentException("Username cannot contain newline characters", nameof(username));
-    }
-
-    private static void SetSecureDirectoryPermissions(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            try
-            {
-                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-            catch
-            {
-            }
-        }
     }
 }

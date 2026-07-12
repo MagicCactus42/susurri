@@ -9,7 +9,8 @@ internal static class ConsoleUi
     public static readonly bool Fancy =
         !Console.IsOutputRedirected &&
         Environment.GetEnvironmentVariable("NO_COLOR") == null &&
-        Environment.GetEnvironmentVariable("TERM") != "dumb";
+        Environment.GetEnvironmentVariable("TERM") != "dumb" &&
+        WindowsConsole.TryEnableVt();
 
     private static readonly Regex AnsiPattern = new(@"\x1b\[[0-9;?]*[A-Za-z]", RegexOptions.Compiled);
 
@@ -68,6 +69,16 @@ internal static class ConsoleUi
             $"{Color("●", Palette.Accent)} {Faint("onion-routed")}   " +
             $"{Color("●", Palette.Mauve)} {Faint("serverless")}");
         Console.WriteLine();
+    }
+
+    public static string BuildPrompt(string? currentUser)
+    {
+        if (!Fancy)
+            return currentUser != null ? $"  {currentUser} > " : "  susurri > ";
+
+        return currentUser != null
+            ? $"  {Color(Bold(currentUser), Palette.Accent)} {Color("❯", Palette.Green)} "
+            : $"  {Faint("susurri")} {Color("❯", Palette.Dim)} ";
     }
 
     public static void PrintPrompt(string? currentUser)

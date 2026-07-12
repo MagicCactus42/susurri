@@ -29,6 +29,12 @@ internal sealed class ChatsCommand : ICommand
             return true;
         }
 
+        if (!WindowsConsole.TryEnableVt())
+        {
+            ConsoleUi.PrintWarning("chats needs a terminal with ANSI escape support. On Windows, try Windows Terminal.");
+            return true;
+        }
+
         await new ChatsScreen(_session).RunAsync(ct).ConfigureAwait(false);
         return true;
     }
