@@ -74,6 +74,35 @@ public sealed class GroupMessage
 
         return Deserialize(plaintext);
     }
+
+    /// <summary>
+    /// Encrypts without the internal 16 KB padding, for delivery inside an onion
+    /// recipient layer that already applies fixed-size padding — avoids padding
+    /// twice (which would overflow the onion block).
+    /// </summary>
+    public EncryptedGroupMessage EncryptUnpadded(GroupKey groupKey)
+    {
+        var nonce = groupKey.GenerateNonce();
+        var ciphertext = groupKey.Encrypt(Serialize(), nonce);
+
+        return new EncryptedGroupMessage
+        {
+            GroupId = GroupId,
+            MessageId = MessageId,
+            Nonce = nonce,
+            Ciphertext = ciphertext,
+            KeyVersion = groupKey.Version
+        };
+    }
+
+    public static GroupMessage DecryptUnpadded(EncryptedGroupMessage encrypted, GroupKey groupKey)
+    {
+        if (encrypted.GroupId != groupKey.GroupId)
+            throw new InvalidOperationException("Group ID mismatch");
+
+        var plaintext = groupKey.Decrypt(encrypted.Ciphertext, encrypted.Nonce);
+        return Deserialize(plaintext);
+    }
 }
 
 public sealed class EncryptedGroupMessage

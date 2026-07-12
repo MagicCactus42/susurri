@@ -75,6 +75,13 @@ internal sealed class LoginCommand : ICommand
                 return Task.CompletedTask;
             };
 
+            chat.OnGroupMessageReceived += received =>
+            {
+                var sender = received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16];
+                ConsoleUi.PrintIncoming($"{received.GroupName}/{sender}", received.Content);
+                return Task.CompletedTask;
+            };
+
             var seeds = NodeConfig.Seeds(config, Array.Empty<string>())
                 .Select(e => $"{e.Address}:{e.Port}");
 

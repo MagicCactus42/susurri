@@ -4,6 +4,7 @@ using NSec.Cryptography;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Network;
 using Susurri.Modules.DHT.Core.Onion;
+using Susurri.Modules.DHT.Core.Onion.GroupChat;
 
 namespace Susurri.Modules.DHT.Core.Services;
 
@@ -23,10 +24,15 @@ public sealed class ChatService : IAsyncDisposable
 
     private readonly ConcurrentDictionary<Guid, ReceivedMessage> _receivedMessages = new();
 
+    private readonly GroupManager _groupManager;
+    private readonly ConcurrentDictionary<Guid, ReceivedGroupMessage> _receivedGroupMessages = new();
+    private static readonly TimeSpan GroupFreshness = TimeSpan.FromMinutes(5);
+
     private const int PathLength = 3;
 
     public event Func<ReceivedMessage, Task>? OnMessageReceived;
     public event Func<Guid, Task>? OnMessageAcknowledged;
+    public event Func<ReceivedGroupMessage, Task>? OnGroupMessageReceived;
 
     public byte[] LocalPublicKey => _dhtNode.EncryptionPublicKey;
     public byte[] LocalSigningPublicKey => _dhtNode.SigningPublicKey;
@@ -63,8 +69,138 @@ public sealed class ChatService : IAsyncDisposable
         _relayService = new RelayService(routingTable, relayLogger);
         _connectionManager = new ConnectionManager(routingTable, _relayService, connectionLogger);
 
+        _groupManager = new GroupManager(encryptionKey);
+
         _router.OnMessageReceived += HandleIncomingMessageAsync;
         _router.OnAckReceived += HandleAckAsync;
+        _router.OnGroupMessageReceived += HandleGroupMessageAsync;
+    }
+
+    public GroupInfo CreateGroup(string name) => _groupManager.CreateGroup(name);
+
+    public IReadOnlyList<GroupInfo> GetGroups() => _groupManager.GetAllGroups().ToList();
+
+    public GroupInfo? GetGroup(Guid groupId) => _groupManager.GetGroup(groupId);
+
+    public WrappedGroupKey InviteMember(Guid groupId, byte[] memberPublicKey)
+    {
+        var invite = _groupManager.GenerateInvite(groupId, memberPublicKey);
+        _groupManager.AddMember(groupId, memberPublicKey);
+        return invite;
+    }
+
+    public GroupInfo? JoinGroup(WrappedGroupKey wrappedKey, string name)
+        => _groupManager.JoinGroup(wrappedKey, name);
+
+    public void LeaveGroup(Guid groupId) => _groupManager.LeaveGroup(groupId);
+
+    public IReadOnlyList<ReceivedGroupMessage> GetGroupMessages(Guid groupId)
+        => _receivedGroupMessages.Values
+            .Where(m => m.GroupId == groupId)
+            .OrderBy(m => m.ReceivedAt)
+            .ToList();
+
+    public async Task<int> SendGroupMessageAsync(Guid groupId, string content)
+    {
+        var group = _groupManager.GetGroup(groupId)
+            ?? throw new InvalidOperationException("Group not found");
+
+        var message = new GroupMessage
+        {
+            GroupId = groupId,
+            SenderPublicKey = LocalPublicKey,
+            Content = content,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
+
+        var encrypted = message.EncryptUnpadded(group.Key);
+        var body = encrypted.Serialize();
+        var envelope = new byte[1 + body.Length];
+        envelope[0] = MessageEnvelope.GroupMessage;
+        Buffer.BlockCopy(body, 0, envelope, 1, body.Length);
+
+        var delivered = 0;
+        foreach (var member in group.Members)
+        {
+            if (member.PublicKey.SequenceEqual(LocalPublicKey))
+                continue;
+
+            var path = _dhtNode.GetRandomNodesForPath(PathLength);
+            if (path.Count == 0)
+                continue;
+
+            try
+            {
+                await _router.SendRawAsync(envelope, member.PublicKey, path).ConfigureAwait(false);
+                delivered++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to deliver group message to a member");
+            }
+        }
+
+        return delivered;
+    }
+
+    private async Task HandleGroupMessageAsync(EncryptedGroupMessage encrypted)
+    {
+        var group = _groupManager.GetGroup(encrypted.GroupId);
+        if (group == null)
+        {
+            _logger.LogDebug("Dropped group message for unknown group {GroupId}", encrypted.GroupId);
+            return;
+        }
+
+        GroupMessage message;
+        try
+        {
+            message = GroupMessage.DecryptUnpadded(encrypted, group.Key);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to decrypt group message for {GroupId}", encrypted.GroupId);
+            return;
+        }
+
+        if (!MessageReplayCache.IsTimestampFresh(message.Timestamp, GroupFreshness))
+        {
+            _logger.LogWarning("Group message {MessageId} rejected: stale timestamp", message.MessageId);
+            return;
+        }
+
+        if (message.SenderPublicKey.SequenceEqual(LocalPublicKey))
+            return;
+
+        string? senderUsername = null;
+        var senderKeyHex = Convert.ToHexString(message.SenderPublicKey);
+        foreach (var kvp in _keyCache)
+        {
+            if (Convert.ToHexString(kvp.Value.EncryptionPublicKey) == senderKeyHex)
+            {
+                senderUsername = kvp.Key;
+                break;
+            }
+        }
+
+        var received = new ReceivedGroupMessage
+        {
+            GroupId = encrypted.GroupId,
+            GroupName = group.Name,
+            MessageId = message.MessageId,
+            SenderPublicKey = message.SenderPublicKey,
+            SenderUsername = senderUsername,
+            Content = message.Content,
+            Timestamp = DateTimeOffset.FromUnixTimeSeconds(message.Timestamp),
+            ReceivedAt = DateTimeOffset.UtcNow
+        };
+
+        _receivedGroupMessages[message.MessageId] = received;
+
+        if (OnGroupMessageReceived != null)
+        {
+            await OnGroupMessageReceived(received).ConfigureAwait(false);
+        }
     }
 
     private RoutingTable GetRoutingTable()
@@ -336,10 +472,23 @@ public sealed class ChatService : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _groupManager.Dispose();
         await _connectionManager.DisposeAsync().ConfigureAwait(false);
         await _relayService.DisposeAsync().ConfigureAwait(false);
         await _dhtNode.DisposeAsync().ConfigureAwait(false);
     }
+}
+
+public sealed class ReceivedGroupMessage
+{
+    public Guid GroupId { get; init; }
+    public string GroupName { get; init; } = string.Empty;
+    public Guid MessageId { get; init; }
+    public byte[] SenderPublicKey { get; init; } = Array.Empty<byte>();
+    public string? SenderUsername { get; init; }
+    public string Content { get; init; } = string.Empty;
+    public DateTimeOffset Timestamp { get; init; }
+    public DateTimeOffset ReceivedAt { get; init; }
 }
 
 public sealed record ChatNodeOptions(

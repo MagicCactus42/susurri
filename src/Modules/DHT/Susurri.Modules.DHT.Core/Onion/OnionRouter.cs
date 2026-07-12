@@ -28,6 +28,8 @@ public sealed class OnionRouter
 
     public event Func<FileTransferMessage, ReplyPath, Task>? OnFileTransferReceived;
 
+    public event Func<GroupChat.EncryptedGroupMessage, Task>? OnGroupMessageReceived;
+
     public event Func<Guid, Task>? OnAckReceived;
 
     public OnionRouter(Key encryptionKey, KademliaDhtNode dhtNode, ILogger<OnionRouter> logger)
@@ -412,9 +414,35 @@ public sealed class OnionRouter
         {
             await HandleFileTransferDeliveryAsync(unpaddedMessage, payload.ReplyPath, freshness).ConfigureAwait(false);
         }
+        else if (MessageEnvelope.IsGroupMessage(unpaddedMessage))
+        {
+            await HandleGroupDeliveryAsync(unpaddedMessage).ConfigureAwait(false);
+        }
         else
         {
             await HandleChatDeliveryAsync(unpaddedMessage, payload.ReplyPath, freshness).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleGroupDeliveryAsync(byte[] unpaddedMessage)
+    {
+        var encrypted = GroupChat.EncryptedGroupMessage.Deserialize(unpaddedMessage.AsSpan(1).ToArray());
+
+        if (!_replayCache.TryRecord(encrypted.MessageId))
+        {
+            SusurriMetrics.ReplaysDropped.Add(1, new KeyValuePair<string, object?>("scope", "onion-group"));
+            _logger.LogDebug("Replay dropped: group message {MessageId}", encrypted.MessageId);
+            return;
+        }
+
+        _logger.LogInformation("Received group message {MessageId} for group {GroupId}",
+            encrypted.MessageId, encrypted.GroupId);
+
+        // Authenticity + freshness are verified by ChatService, which holds the
+        // group symmetric key needed to decrypt and read the timestamp.
+        if (OnGroupMessageReceived != null)
+        {
+            await OnGroupMessageReceived(encrypted).ConfigureAwait(false);
         }
     }
 

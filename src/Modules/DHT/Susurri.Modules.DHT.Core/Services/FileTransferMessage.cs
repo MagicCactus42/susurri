@@ -11,12 +11,19 @@ namespace Susurri.Modules.DHT.Core.Services;
 public static class MessageEnvelope
 {
     public const byte FileTransfer = 0x02;
+    public const byte GroupMessage = 0x03;
 
     /// <summary>
     /// Returns true if the first byte of an unpadded payload indicates a file transfer message.
     /// </summary>
     public static bool IsFileTransfer(byte[] data) =>
         data.Length > 0 && data[0] == FileTransfer;
+
+    /// <summary>
+    /// Returns true if the first byte of an unpadded payload indicates a group message.
+    /// </summary>
+    public static bool IsGroupMessage(byte[] data) =>
+        data.Length > 0 && data[0] == GroupMessage;
 }
 
 public enum FileMessageType : byte
