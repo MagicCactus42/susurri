@@ -2,102 +2,70 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Susurri.GUI.ViewModels"
              x:Class="Susurri.GUI.Views.LoginView"
-             x:DataType="vm:LoginViewModel">
+             x:DataType="vm:LoginViewModel"
+             Background="{StaticResource GroundBrush}">
 
-    <Grid RowDefinitions="Auto,*,Auto" MaxWidth="400" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <!-- Header -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,32">
-            <TextBlock Text="Welcome Back"
-                       FontSize="28"
-                       FontWeight="Bold"
-                       Foreground="{StaticResource TextPrimaryBrush}"
-                       HorizontalAlignment="Center" />
-            <TextBlock Text="Enter your credentials to continue"
-                       FontSize="14"
-                       Foreground="{StaticResource TextMutedBrush}"
-                       HorizontalAlignment="Center"
-                       Margin="0,8,0,0" />
-        </StackPanel>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Width="460" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,48" Spacing="0">
+            <TextBlock Classes="cond" Text="SUSURRI" FontSize="30" LetterSpacing="14"
+                       HorizontalAlignment="Center" Margin="14,0,0,6" />
+            <TextBlock Classes="label" Text="NO SERVERS · NO ACCOUNTS · NO PHONE NUMBERS"
+                       FontSize="10" LetterSpacing="2.2" HorizontalAlignment="Center" Margin="0,0,0,36" />
 
-        <!-- Form -->
-        <StackPanel Grid.Row="1" Spacing="16">
-            <!-- Username -->
-            <StackPanel Spacing="6">
-                <TextBlock Text="Username"
-                           FontSize="13"
-                           Foreground="{StaticResource TextSecondaryBrush}" />
-                <TextBox Text="{Binding Username}"
-                         Watermark="Enter username"
-                         Classes="modern" />
+            <StackPanel IsVisible="{Binding CacheAvailable}" Spacing="8" Margin="0,0,0,24">
+                <TextBlock Classes="label" Text="CACHED IDENTITY" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding CachePin}" PasswordChar="●"
+                             Watermark="cache password">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Enter" Command="{Binding UnlockCacheCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Grid.Column="1" Classes="ice" Content="UNLOCK" Margin="8,0,0,0"
+                            Command="{Binding UnlockCacheCommand}" VerticalAlignment="Stretch" />
+                </Grid>
+                <TextBlock Classes="mut" Text="— or derive the identity manually —"
+                           FontSize="11" HorizontalAlignment="Center" Margin="0,8,0,0" />
             </StackPanel>
 
-            <!-- Passphrase -->
-            <StackPanel Spacing="6">
-                <TextBlock Text="Passphrase (6+ words)"
-                           FontSize="13"
-                           Foreground="{StaticResource TextSecondaryBrush}" />
-                <TextBox Text="{Binding Passphrase}"
-                         Watermark="Enter your BIP39 passphrase"
-                         PasswordChar="*"
-                         Classes="modern"
-                         AcceptsReturn="False" />
+            <TextBlock Classes="label" Text="IDENTITY" Margin="0,0,0,7" />
+            <TextBox Text="{Binding Username}" Watermark="username" Margin="0,0,0,18" />
+
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,7">
+                <TextBlock Grid.Column="0" Classes="label" Text="PASSPHRASE" />
+                <TextBlock Grid.Column="1" Classes="mut" FontSize="10.5" Text="{Binding WordCountText}" />
+            </Grid>
+            <TextBox Text="{Binding Passphrase}" PasswordChar="●"
+                     Watermark="6–24 BIP39 words — this is the whole account" Margin="0,0,0,18">
+                <TextBox.KeyBindings>
+                    <KeyBinding Gesture="Enter" Command="{Binding LoginCommand}" />
+                </TextBox.KeyBindings>
+            </TextBox>
+
+            <TextBlock Classes="label" Text="PORT — OPTIONAL" Margin="0,0,0,7" />
+            <TextBox Text="{Binding PortText}" Watermark="auto" Width="140" HorizontalAlignment="Left"
+                     Margin="0,0,0,18" />
+
+            <CheckBox IsChecked="{Binding SaveCredentials}"
+                      Content="remember on this device — encrypted with a separate password" />
+            <TextBox Text="{Binding NewCachePin}" PasswordChar="●"
+                     Watermark="cache password (8+ chars)" Margin="0,8,0,0"
+                     IsVisible="{Binding SaveCredentials}" />
+
+            <TextBlock Classes="err" Text="{Binding Error}" IsVisible="{Binding HasError}"
+                       TextWrapping="Wrap" FontSize="12" Margin="0,16,0,0" />
+
+            <StackPanel IsVisible="{Binding IsBusy}" Spacing="8" Margin="0,18,0,0">
+                <ProgressBar IsIndeterminate="True" />
+                <TextBlock Classes="dim" FontSize="11.5" Text="{Binding BusyText}" />
             </StackPanel>
 
-            <!-- Generate Passphrase -->
-            <Button Content="Generate New Passphrase"
-                    Command="{Binding GeneratePassphraseCommand}"
-                    Classes="ghost"
-                    HorizontalAlignment="Left" />
-
-            <!-- Generated Passphrase Display -->
-            <Border IsVisible="{Binding HasGeneratedPassphrase}"
-                    Background="{StaticResource BackgroundTertiaryBrush}"
-                    CornerRadius="6"
-                    Padding="12">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Generated Passphrase (copy this!):"
-                               FontSize="12"
-                               Foreground="{StaticResource TextMutedBrush}" />
-                    <TextBox Text="{Binding GeneratedPassphrase}"
-                             IsReadOnly="True"
-                             TextWrapping="Wrap"
-                             FontFamily="Consolas, monospace"
-                             FontSize="13"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             Foreground="{StaticResource AccentBrush}" />
-                    <Button Content="Copy &amp; Use"
-                            Command="{Binding CopyAndUseCommand}"
-                            Classes="secondary"
-                            HorizontalAlignment="Left" />
-                </StackPanel>
-            </Border>
-
-            <!-- Cache Credentials -->
-            <CheckBox Content="Remember credentials locally"
-                      IsChecked="{Binding CacheCredentials}"
-                      Foreground="{StaticResource TextSecondaryBrush}" />
-
-            <!-- Status -->
-            <TextBlock Text="{Binding StatusMessage}"
-                       FontSize="13"
-                       Foreground="{StaticResource ErrorBrush}"
-                       IsVisible="{Binding HasError}"
-                       TextWrapping="Wrap" />
+            <Button Classes="ice" Content="CONNECT" Command="{Binding LoginCommand}"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Margin="0,26,0,0" />
+            <Button Classes="link" Content="no identity yet? generate a passphrase →"
+                    Command="{Binding GenerateCommand}" HorizontalAlignment="Center" Margin="0,14,0,0"
+                    FontSize="12" />
         </StackPanel>
-
-        <!-- Actions -->
-        <StackPanel Grid.Row="2" Spacing="12" Margin="0,32,0,0">
-            <Button Content="Login"
-                    Command="{Binding LoginCommand}"
-                    Classes="primary"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Center" />
-            <Button Content="Create Account"
-                    Command="{Binding SignupCommand}"
-                    Classes="secondary"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Center" />
-        </StackPanel>
-    </Grid>
+    </ScrollViewer>
 </UserControl>

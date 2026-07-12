@@ -1,105 +1,101 @@
 using System;
-using System.Security.Cryptography;
-using System.Windows.Input;
-using dotnetstandard_bip39;
+using System.Collections.ObjectModel;
+using System.Linq;
 using Susurri.GUI.Services;
 
 namespace Susurri.GUI.ViewModels;
 
+public sealed record WordItem(int Index, string Word);
+
 public class GenerateViewModel : ViewModelBase
 {
-    private readonly AppState _appState;
-    private string _generatedPassphrase = string.Empty;
-    private int _wordCount = 12;
-    private string _statusMessage = string.Empty;
+    private readonly AppSession _session;
+    private readonly Action _onBack;
+
+    private int _selectedWordCount = 12;
+    private string _passphrase = string.Empty;
+    private string _entropyText = string.Empty;
+    private string _error = string.Empty;
     private bool _copied;
 
-    public GenerateViewModel(AppState appState)
+    public GenerateViewModel(AppSession session, Action onBack)
     {
-        _appState = appState;
+        _session = session;
+        _onBack = onBack;
+
         GenerateCommand = new RelayCommand(Generate);
-        CopyCommand = new RelayCommand(Copy);
+        CopyCommand = new RelayCommand(() => _ = CopyAsync(), () => HasWords);
+        BackCommand = new RelayCommand(() => _onBack());
     }
 
-    public string GeneratedPassphrase
+    public int[] WordCounts { get; } = { 12, 15, 18, 21, 24 };
+
+    public int SelectedWordCount
     {
-        get => _generatedPassphrase;
-        set => SetField(ref _generatedPassphrase, value);
+        get => _selectedWordCount;
+        set => SetField(ref _selectedWordCount, value);
     }
 
-    public int WordCount
+    public ObservableCollection<WordItem> Words { get; } = new();
+
+    public bool HasWords => Words.Count > 0;
+
+    public string EntropyText
     {
-        get => _wordCount;
-        set => SetField(ref _wordCount, value);
+        get => _entropyText;
+        private set => SetField(ref _entropyText, value);
     }
 
-    public string StatusMessage
+    public string Error
     {
-        get => _statusMessage;
-        set => SetField(ref _statusMessage, value);
+        get => _error;
+        private set
+        {
+            if (SetField(ref _error, value))
+                OnPropertyChanged(nameof(HasError));
+        }
     }
+
+    public bool HasError => !string.IsNullOrEmpty(_error);
 
     public bool Copied
     {
         get => _copied;
-        set => SetField(ref _copied, value);
+        private set => SetField(ref _copied, value);
     }
 
-    public int[] WordCountOptions => new[] { 12, 15, 18, 21, 24 };
-
-    public ICommand GenerateCommand { get; }
-    public ICommand CopyCommand { get; }
+    public RelayCommand GenerateCommand { get; }
+    public RelayCommand CopyCommand { get; }
+    public RelayCommand BackCommand { get; }
 
     private void Generate()
     {
+        Error = string.Empty;
+        Copied = false;
         try
         {
-            var entropyBytes = WordCount switch
-            {
-                12 => 16,
-                15 => 20,
-                18 => 24,
-                21 => 28,
-                24 => 32,
-                _ => 16
-            };
+            _passphrase = _session.GeneratePassphrase(SelectedWordCount);
+            var words = _passphrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-            var entropy = new byte[entropyBytes];
-            RandomNumberGenerator.Fill(entropy);
-            var entropyHex = Convert.ToHexString(entropy).ToLowerInvariant();
+            Words.Clear();
+            foreach (var (word, index) in words.Select((w, i) => (w, i)))
+                Words.Add(new WordItem(index + 1, word));
 
-            var bip = new BIP39();
-            GeneratedPassphrase = string.Join(" ", bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English)
-                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-            StatusMessage = $"Generated {WordCount}-word passphrase ({entropyBytes * 8} bits of entropy)";
-            Copied = false;
+            EntropyText = $"{words.Length} words · {words.Length * 11 - words.Length / 3} bits of entropy";
+            OnPropertyChanged(nameof(HasWords));
+            CopyCommand.RaiseCanExecuteChanged();
         }
-        catch (Exception ex)
+        catch (ArgumentException ex)
         {
-            StatusMessage = $"Error: {ex.Message}";
+            Error = $"{ex.Message} Valid word counts: 12, 15, 18, 21, 24.";
         }
     }
 
-    private async void Copy()
+    private async System.Threading.Tasks.Task CopyAsync()
     {
-        if (string.IsNullOrEmpty(GeneratedPassphrase)) return;
-
-        try
-        {
-            var topLevel = Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                ? desktop.MainWindow
-                : null;
-
-            if (topLevel?.Clipboard != null)
-            {
-                await topLevel.Clipboard.SetTextAsync(GeneratedPassphrase);
-                Copied = true;
-                StatusMessage = "Copied to clipboard!";
-            }
-        }
-        catch
-        {
-            StatusMessage = "Failed to copy to clipboard";
-        }
+        if (string.IsNullOrEmpty(_passphrase))
+            return;
+        await ClipboardHelper.SetTextAsync(_passphrase);
+        Copied = true;
     }
 }

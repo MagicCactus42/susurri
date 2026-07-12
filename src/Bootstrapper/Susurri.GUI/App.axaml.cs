@@ -2,10 +2,12 @@ using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Susurri.GUI.Services;
 using Susurri.GUI.ViewModels;
 using Susurri.GUI.Views;
-using Susurri.GUI.Services;
+using Susurri.Modules.IAM.Application;
 
 namespace Susurri.GUI;
 
@@ -30,6 +32,16 @@ public partial class App : Application
             {
                 DataContext = Services.GetRequiredService<MainWindowViewModel>()
             };
+            desktop.Exit += (_, _) =>
+            {
+                try
+                {
+                    Services.GetRequiredService<AppSession>().DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                }
+            };
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -37,11 +49,16 @@ public partial class App : Application
 
     private static void ConfigureServices(IServiceCollection services)
     {
-        services.AddSingleton<AppState>();
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: true)
+            .AddEnvironmentVariables()
+            .Build();
+
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging();
+        services.AddIam();
+        services.AddSingleton<AppSession>();
         services.AddSingleton<MainWindowViewModel>();
-        services.AddTransient<LoginViewModel>();
-        services.AddTransient<DashboardViewModel>();
-        services.AddTransient<GenerateViewModel>();
-        services.AddTransient<SettingsViewModel>();
     }
 }

@@ -1,24 +1,17 @@
-using System;
-using System.Windows.Input;
 using Susurri.GUI.Services;
 
 namespace Susurri.GUI.ViewModels;
 
 public class MainWindowViewModel : ViewModelBase
 {
-    private readonly AppState _appState;
+    private readonly AppSession _session;
     private ViewModelBase _currentView;
-    private string _currentViewName = "Login";
 
-    public MainWindowViewModel(AppState appState)
+    public MainWindowViewModel(AppSession session)
     {
-        _appState = appState;
-        _currentView = new LoginViewModel(appState, NavigateToDashboard);
-
-        NavigateCommand = new RelayCommand<string>(Navigate);
+        _session = session;
+        _currentView = CreateLogin();
     }
-
-    public AppState AppState => _appState;
 
     public ViewModelBase CurrentView
     {
@@ -26,65 +19,11 @@ public class MainWindowViewModel : ViewModelBase
         set => SetField(ref _currentView, value);
     }
 
-    public string CurrentViewName
-    {
-        get => _currentViewName;
-        set => SetField(ref _currentViewName, value);
-    }
+    private LoginViewModel CreateLogin() => new(_session, OnLoggedIn, ShowGenerate);
 
-    public ICommand NavigateCommand { get; }
+    private void OnLoggedIn() => CurrentView = new ShellViewModel(_session, ShowLogin);
 
-    private void Navigate(string? viewName)
-    {
-        if (string.IsNullOrEmpty(viewName)) return;
+    private void ShowGenerate() => CurrentView = new GenerateViewModel(_session, ShowLogin);
 
-        CurrentViewName = viewName;
-        CurrentView = viewName switch
-        {
-            "Login" => new LoginViewModel(_appState, NavigateToDashboard),
-            "Dashboard" => new DashboardViewModel(_appState),
-            "Generate" => new GenerateViewModel(_appState),
-            "Settings" => new SettingsViewModel(_appState),
-            _ => CurrentView
-        };
-    }
-
-    private void NavigateToDashboard()
-    {
-        Navigate("Dashboard");
-    }
-}
-
-public class RelayCommand<T> : ICommand
-{
-    private readonly Action<T?> _execute;
-    private readonly Func<T?, bool>? _canExecute;
-
-    public RelayCommand(Action<T?> execute, Func<T?, bool>? canExecute = null)
-    {
-        _execute = execute;
-        _canExecute = canExecute;
-    }
-
-    public bool CanExecute(object? parameter) => _canExecute?.Invoke((T?)parameter) ?? true;
-    public void Execute(object? parameter) => _execute((T?)parameter);
-    public event EventHandler? CanExecuteChanged;
-    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
-}
-
-public class RelayCommand : ICommand
-{
-    private readonly Action _execute;
-    private readonly Func<bool>? _canExecute;
-
-    public RelayCommand(Action execute, Func<bool>? canExecute = null)
-    {
-        _execute = execute;
-        _canExecute = canExecute;
-    }
-
-    public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
-    public void Execute(object? parameter) => _execute();
-    public event EventHandler? CanExecuteChanged;
-    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+    private void ShowLogin() => CurrentView = CreateLogin();
 }

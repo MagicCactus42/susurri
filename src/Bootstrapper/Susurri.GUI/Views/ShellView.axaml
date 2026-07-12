@@ -1,0 +1,476 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Susurri.GUI.ViewModels"
+             xmlns:svc="using:Susurri.GUI.Services"
+             x:Class="Susurri.GUI.Views.ShellView"
+             x:DataType="vm:ShellViewModel"
+             x:Name="Root"
+             Background="{StaticResource GroundBrush}">
+
+    <UserControl.Styles>
+        <Style Selector="TextBlock.peer">
+            <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+        </Style>
+        <Style Selector="TextBlock.me">
+            <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+        </Style>
+        <Style Selector="TextBlock.ev">
+            <Setter Property="Foreground" Value="{StaticResource AmberBrush}" />
+        </Style>
+        <Style Selector="Border.msgrow">
+            <Setter Property="BorderBrush" Value="{StaticResource HairlineSoftBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="16,7" />
+        </Style>
+        <Style Selector="Border.msgrow.ev">
+            <Setter Property="Background" Value="{StaticResource AmberFaintBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource RailBrush}"
+                BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="14,5">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
+                    <TextBlock Classes="ice" FontSize="11.5" Text="{Binding UserText}" />
+                    <TextBlock Classes="mut" FontSize="11.5" Text="{Binding FingerprintShort}" />
+                    <TextBlock Classes="mut" FontSize="11.5" Text="{Binding PortText}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14">
+                    <TextBlock Classes="dim" FontSize="11.5" Text="{Binding Peers, StringFormat='⇅ {0} peers'}" />
+                    <TextBlock Classes="dim" FontSize="11.5" Text="{Binding Relays, StringFormat='{}{0} relays'}" />
+                    <TextBlock FontSize="11.5" Classes="ok" Classes.err="{Binding !IsConnected}"
+                               Text="{Binding ConnectionText}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid ColumnDefinitions="52,232,*,262">
+
+            <Border Grid.Column="0" Background="{StaticResource RailBrush}"
+                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="0,12">
+                    <StackPanel DockPanel.Dock="Bottom" Spacing="4" HorizontalAlignment="Center">
+                        <Button Classes="rail" Content="⏻" Command="{Binding LogoutCommand}"
+                                ToolTip.Tip="Log out" />
+                    </StackPanel>
+                    <StackPanel Spacing="4" HorizontalAlignment="Center">
+                        <Button Classes="rail" Classes.on="{Binding IsChats}" Content="▤"
+                                Command="{Binding ShowChatsCommand}" ToolTip.Tip="Chats" />
+                        <Button Classes="rail" Classes.on="{Binding IsContacts}" Content="⛨"
+                                Command="{Binding ShowContactsCommand}" ToolTip.Tip="Contacts — pinned keys" />
+                        <Button Classes="rail" Classes.on="{Binding IsTransfers}" Content="⇅"
+                                Command="{Binding ShowTransfersCommand}" ToolTip.Tip="File transfers" />
+                        <Button Classes="rail" Classes.on="{Binding IsNode}" Content="⬡"
+                                Command="{Binding ShowNodeCommand}" ToolTip.Tip="Node" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="1" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,1,0">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+                    <TextBlock Grid.Row="0" Classes="label" Text="GROUPS" Margin="16,14,16,6" />
+                    <ListBox Grid.Row="1" ItemsSource="{Binding Groups}" MaxHeight="230"
+                             SelectedItem="{Binding SelectedGroup}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="svc:ConversationModel">
+                                <Grid ColumnDefinitions="20,*,Auto" Margin="14,6">
+                                    <TextBlock Classes="ice" FontSize="12" Text="{Binding Glyph}" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock FontSize="12.5" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Classes="mut" FontSize="10" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Classes="amber" FontSize="11"
+                                               IsVisible="{Binding HasUnread}"
+                                               Text="{Binding Unread, StringFormat='●{0}'}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Grid.Row="2" Classes="label" Text="DIRECT" Margin="16,16,16,6" />
+                    <ListBox Grid.Row="3" ItemsSource="{Binding Directs}"
+                             SelectedItem="{Binding SelectedDirect}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="svc:ConversationModel">
+                                <Grid ColumnDefinitions="20,*,Auto" Margin="14,6">
+                                    <TextBlock Classes="mut" FontSize="12" Text="{Binding Glyph}" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock FontSize="12.5" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Classes="mut" FontSize="10" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Classes="amber" FontSize="11"
+                                               IsVisible="{Binding HasUnread}"
+                                               Text="{Binding Unread, StringFormat='●{0}'}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Row="4" Spacing="6" Margin="10,10,10,12">
+                        <TextBox Text="{Binding NewChatName}" Watermark="@ new direct chat…" FontSize="11.5">
+                            <TextBox.KeyBindings>
+                                <KeyBinding Gesture="Enter" Command="{Binding StartChatCommand}" />
+                            </TextBox.KeyBindings>
+                        </TextBox>
+                        <TextBox Text="{Binding NewGroupName}" Watermark="◆ create group…" FontSize="11.5">
+                            <TextBox.KeyBindings>
+                                <KeyBinding Gesture="Enter" Command="{Binding CreateGroupCommand}" />
+                            </TextBox.KeyBindings>
+                        </TextBox>
+                        <TextBox Text="{Binding JoinCode}" Watermark="⤓ paste invite code…" FontSize="11.5">
+                            <TextBox.KeyBindings>
+                                <KeyBinding Gesture="Enter" Command="{Binding JoinGroupCommand}" />
+                            </TextBox.KeyBindings>
+                        </TextBox>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="2">
+
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" IsVisible="{Binding IsChats}">
+                    <Border Grid.Row="0" BorderBrush="{StaticResource HairlineBrush}"
+                            BorderThickness="0,0,0,1" Padding="18,11" IsVisible="{Binding HasSelection}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Classes="ice" FontSize="14"
+                                               Text="{Binding SelectedConversation.Glyph}" />
+                                    <TextBlock Classes="cond" FontSize="15" LetterSpacing="2"
+                                               Text="{Binding SelectedConversation.Title}" />
+                                </StackPanel>
+                                <TextBlock Classes="mut" FontSize="10.5"
+                                           Text="{Binding SelectedConversation.Subtitle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                        VerticalAlignment="Center">
+                                <TextBox Text="{Binding InviteUsername}" Watermark="@user" Width="120"
+                                         FontSize="11" IsVisible="{Binding SelectedIsOwnedGroup}" />
+                                <Button Classes="ghost" Content="INVITE" FontSize="11"
+                                        IsVisible="{Binding SelectedIsOwnedGroup}"
+                                        Command="{Binding InviteCommand}" />
+                                <Button Classes="ghost" Content="ROTATE KEY" FontSize="11"
+                                        IsVisible="{Binding SelectedIsOwnedGroup}"
+                                        Command="{Binding RotateCommand}" />
+                                <Button Classes="ghost" Content="LEAVE" FontSize="11"
+                                        IsVisible="{Binding SelectedIsGroup}"
+                                        Command="{Binding LeaveCommand}" />
+                                <Button Classes="ghost" Content="⇡ SEND FILE" FontSize="11"
+                                        IsVisible="{Binding SelectedIsDirect}"
+                                        Click="OnSendFileClick" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1" Background="{StaticResource AmberFaintBrush}"
+                            Padding="18,8" IsVisible="{Binding HasInviteCode}">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <TextBlock Classes="amber" FontSize="11" Text="INVITE CODE"
+                                       VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <TextBox Grid.Column="1" Text="{Binding InviteCode, Mode=OneWay}" IsReadOnly="True"
+                                     FontSize="10.5" Background="Transparent" BorderThickness="0" />
+                            <Button Grid.Column="2" Classes="link" Content="copy" FontSize="11"
+                                    Click="OnCopyInviteClick" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Padding="18,6" IsVisible="{Binding HasChatError}">
+                        <TextBlock Classes="err" FontSize="11.5" TextWrapping="Wrap"
+                                   Text="{Binding ChatError}" />
+                    </Border>
+
+                    <ScrollViewer Grid.Row="3" x:Name="MessagesScroll"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <Grid>
+                            <ItemsControl ItemsSource="{Binding SelectedConversation.Messages}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="svc:MessageModel">
+                                        <Border Classes="msgrow" Classes.ev="{Binding IsEvent}">
+                                            <Grid ColumnDefinitions="48,90,*,Auto">
+                                                <TextBlock Classes="mut" FontSize="11" Text="{Binding Time}"
+                                                           VerticalAlignment="Top" Margin="0,1,0,0" />
+                                                <TextBlock Grid.Column="1" FontSize="11.5"
+                                                           Classes="peer"
+                                                           Classes.me="{Binding Outgoing}"
+                                                           Classes.ev="{Binding IsEvent}"
+                                                           Text="{Binding Sender}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Top" Margin="0,1,8,0" />
+                                                <TextBlock Grid.Column="2" FontSize="13"
+                                                           Classes.ev="{Binding IsEvent}"
+                                                           Text="{Binding Content}" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="3" Classes="mut" FontSize="11"
+                                                           Classes.ok="{Binding IsAcknowledged}"
+                                                           Classes.err="{Binding IsFailed}"
+                                                           Text="{Binding StatusGlyph}"
+                                                           VerticalAlignment="Top" Margin="10,1,0,0" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Classes="mut" FontSize="12" HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" Margin="0,60,0,0"
+                                       IsVisible="{Binding !HasSelection}"
+                                       Text="select a conversation — or start one in the bottom-left" />
+                        </Grid>
+                    </ScrollViewer>
+
+                    <Border Grid.Row="4" BorderBrush="{StaticResource HairlineBrush}"
+                            BorderThickness="0,1,0,0" Padding="18,10">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <TextBlock Classes="ice" FontSize="12.5" VerticalAlignment="Center"
+                                       Text="{Binding ComposerPrompt}" Margin="0,0,12,0" />
+                            <TextBox Grid.Column="1" Text="{Binding MessageText}"
+                                     Watermark="message… (enter to send)"
+                                     Background="Transparent" BorderThickness="0"
+                                     IsEnabled="{Binding HasSelection}" FontSize="13">
+                                <TextBox.KeyBindings>
+                                    <KeyBinding Gesture="Enter" Command="{Binding SendCommand}" />
+                                </TextBox.KeyBindings>
+                            </TextBox>
+                            <Button Grid.Column="2" Classes="link" Content="➤" FontSize="15"
+                                    Command="{Binding SendCommand}" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <DockPanel IsVisible="{Binding IsContacts}" Margin="18,14">
+                    <StackPanel DockPanel.Dock="Top" Spacing="10">
+                        <TextBlock Classes="label" Text="CONTACTS — PETNAMES &amp; PINNED KEYS" />
+                        <Grid ColumnDefinitions="*,*,Auto">
+                            <TextBox Grid.Column="0" Text="{Binding Contacts.NewPetname}"
+                                     Watermark="petname" Margin="0,0,8,0" FontSize="12" />
+                            <TextBox Grid.Column="1" Text="{Binding Contacts.NewUsername}"
+                                     Watermark="@username" Margin="0,0,8,0" FontSize="12" />
+                            <Button Grid.Column="2" Classes="ice" Content="PIN KEY"
+                                    Command="{Binding Contacts.AddCommand}" />
+                        </Grid>
+                        <TextBlock FontSize="11.5" TextWrapping="Wrap" Classes="dim"
+                                   Classes.err="{Binding Contacts.StatusIsError}"
+                                   IsVisible="{Binding Contacts.HasStatus}"
+                                   Text="{Binding Contacts.Status}" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="*,320" Margin="0,14,0,0">
+                        <ListBox ItemsSource="{Binding Contacts.Items}"
+                                 SelectedItem="{Binding Contacts.Selected}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="vm:ContactModel">
+                                    <Grid ColumnDefinitions="*,Auto" Margin="12,7">
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock FontSize="13" Text="{Binding Petname}" />
+                                                <TextBlock Classes="mut" FontSize="11.5"
+                                                           Text="{Binding Username, StringFormat='@{0}'}" />
+                                            </StackPanel>
+                                            <TextBlock Classes="mut" FontSize="10.5" Text="{Binding KeyShort}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" FontSize="10" VerticalAlignment="Center"
+                                                   Classes="mut" Classes.ok="{Binding Verified}"
+                                                   Text="{Binding VerifiedText}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <Border Grid.Column="1" BorderBrush="{StaticResource HairlineBrush}"
+                                BorderThickness="1,0,0,0" Padding="16,4,0,0"
+                                IsVisible="{Binding Contacts.HasSelection}">
+                            <StackPanel Spacing="10">
+                                <TextBlock Classes="label" Text="SAFETY NUMBER" />
+                                <TextBlock Classes="dim" FontSize="12" LineHeight="22" TextWrapping="Wrap"
+                                           Text="{Binding Contacts.SafetyNumber}" />
+                                <TextBlock Classes="mut" FontSize="10.5" TextWrapping="Wrap"
+                                           Text="both sides see the same 60 digits — compare over a channel you trust" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Classes="ice" Content="MARK VERIFIED" FontSize="11"
+                                            Command="{Binding Contacts.MarkVerifiedCommand}" />
+                                    <Button Classes="ghost" Content="CHECK DHT" FontSize="11"
+                                            Command="{Binding Contacts.CheckCommand}" />
+                                    <Button Classes="ghost" Content="REMOVE" FontSize="11"
+                                            Command="{Binding Contacts.RemoveCommand}" />
+                                </StackPanel>
+                                <TextBlock FontSize="11.5" TextWrapping="Wrap" Classes="ok"
+                                           Classes.err="{Binding Contacts.CheckFailed}"
+                                           IsVisible="{Binding Contacts.HasCheckResult}"
+                                           Text="{Binding Contacts.CheckResult}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </DockPanel>
+
+                <DockPanel IsVisible="{Binding IsTransfers}" Margin="18,14">
+                    <StackPanel DockPanel.Dock="Top" Spacing="6">
+                        <TextBlock Classes="label" Text="FILE TRANSFERS — PADDED ONION FRAMES" />
+                        <TextBlock Classes="mut" FontSize="11" TextWrapping="Wrap"
+                                   Text="chunks ride the same 16 KB frames as messages · ~1 MB/min · SHA-256 verified on completion" />
+                        <TextBlock Classes="mut" FontSize="12" Margin="0,20,0,0"
+                                   IsVisible="{Binding !Transfers.HasAny}"
+                                   Text="no transfers yet — offer a file from a direct chat" />
+                    </StackPanel>
+                    <ScrollViewer Margin="0,14,0,0">
+                        <ItemsControl ItemsSource="{Binding Transfers.Items}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="svc:TransferModel">
+                                    <Border Background="{StaticResource PanelBrush}"
+                                            BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                                            Margin="0,0,0,10" Padding="14,10">
+                                        <StackPanel Spacing="8">
+                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                                <TextBlock Classes="ice" FontSize="13"
+                                                           Text="{Binding DirectionGlyph}" Margin="0,0,10,0" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                                                    <TextBlock FontSize="13" Text="{Binding FileName}" />
+                                                    <TextBlock Classes="mut" FontSize="11.5"
+                                                               VerticalAlignment="Center"
+                                                               Text="{Binding SizeText}" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2" Classes="mut" FontSize="10.5"
+                                                           VerticalAlignment="Center" Margin="0,0,12,0"
+                                                           Text="{Binding IdShort}" />
+                                                <TextBlock Grid.Column="3" FontSize="10.5"
+                                                           VerticalAlignment="Center"
+                                                           Classes="dim"
+                                                           Classes.amber="{Binding IsAwaitingAccept}"
+                                                           Classes.ok="{Binding IsCompleted}"
+                                                           Classes.err="{Binding IsFailed}"
+                                                           Text="{Binding StatusText}" />
+                                            </Grid>
+                                            <ProgressBar Value="{Binding Percent}" Maximum="100"
+                                                         IsVisible="{Binding IsActive}" />
+                                            <TextBlock Classes="dim" FontSize="11" TextWrapping="Wrap"
+                                                       IsVisible="{Binding Detail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                       Text="{Binding Detail}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8"
+                                                        IsVisible="{Binding IsAwaitingAccept}">
+                                                <Button Classes="ice" Content="ACCEPT" FontSize="11"
+                                                        Command="{Binding #Root.((vm:ShellViewModel)DataContext).Transfers.AcceptCommand}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Classes="ghost" Content="REJECT" FontSize="11"
+                                                        Command="{Binding #Root.((vm:ShellViewModel)DataContext).Transfers.RejectCommand}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <ScrollViewer IsVisible="{Binding IsNode}" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="18,14" Spacing="18" MaxWidth="640" HorizontalAlignment="Left">
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="label" Text="IDENTITY" />
+                            <TextBlock Classes="ice" FontSize="14" Text="{Binding UserText}" />
+                            <TextBlock Classes="dim" FontSize="11.5" TextWrapping="Wrap"
+                                       Text="{Binding FingerprintFull}" />
+                            <TextBlock Classes="mut" FontSize="10.5" TextWrapping="Wrap"
+                                       Text="x25519 public key — published as a signed dht record under your username" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="label" Text="BOOTSTRAP SEEDS" />
+                            <TextBlock Classes="dim" FontSize="11.5" Text="{Binding SeedsText}" />
+                        </StackPanel>
+                        <StackPanel Spacing="8">
+                            <TextBlock Classes="label" Text="LOCAL HISTORY" />
+                            <CheckBox Content="persist conversations to disk (encrypted)"
+                                      IsChecked="{Binding HistoryEnabled}"
+                                      IsEnabled="{Binding HistoryAvailable}" />
+                            <TextBlock Classes="dim" FontSize="11.5" TextWrapping="Wrap"
+                                       Text="{Binding HistoryStatusText}" />
+                            <TextBlock Classes="mut" FontSize="10.5" TextWrapping="Wrap"
+                                       Text="the key is derived from your passphrase and never touches disk; turning this off shreds the store" />
+                            <TextBlock Classes="dim" FontSize="11.5" Margin="0,4,0,0"
+                                       Text="{Binding DownloadsText, StringFormat='received files → {0}'}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="label" Text="APP" />
+                            <TextBlock Classes="dim" FontSize="11.5" Text="{Binding VersionText}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <Border Grid.Column="3" Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1,0,0,0">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="16,14" Spacing="4">
+                        <TextBlock Classes="label" Text="CIRCUIT" Margin="0,0,0,6" />
+                        <TextBlock Classes="dim" FontSize="11.5" TextWrapping="Wrap" LineHeight="19"
+                                   Text="you ▸ relay ▸ relay ▸ relay ▸ peer" />
+                        <TextBlock Classes="mut" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="3 random hops per message — each relay peels one layer and learns only its neighbours" />
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="frame" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="16 384 B · padded" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="layers" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="ChaCha20-Poly1305 ×3" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="replies" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="encrypted reply tokens" />
+                        </Grid>
+
+                        <TextBlock Classes="label" Text="RATCHET" Margin="0,18,0,6" />
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="direct" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="double ratchet · fs + pcs" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="groups" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="sender-key chains" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="epoch" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="256 msg / 24 h" />
+                        </Grid>
+
+                        <TextBlock Classes="label" Text="NODE" Margin="0,18,0,6" />
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="peers" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="{Binding Peers}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="relays" />
+                            <TextBlock Grid.Column="1" FontSize="11" Classes.ok="{Binding IsConnected}"
+                                       Text="{Binding Relays}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="port" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="{Binding PortText}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="nat" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="hole punch · relay fallback" />
+                        </Grid>
+
+                        <TextBlock Classes="label" Text="CONTACTS" Margin="0,18,0,6" />
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="pinned" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="{Binding PinnedCount}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="verified" />
+                            <TextBlock Grid.Column="1" FontSize="11" Classes.ok="{Binding IsConnected}"
+                                       Text="{Binding VerifiedCount}" />
+                        </Grid>
+
+                        <TextBlock Classes="label" Text="STORE" Margin="0,18,0,6" />
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="history" />
+                            <TextBlock Grid.Column="1" FontSize="11"
+                                       Classes.ok="{Binding HistoryEnabled}"
+                                       Text="{Binding HistoryShortText}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Classes="dim" FontSize="11" Text="offline queue" />
+                            <TextBlock Grid.Column="1" FontSize="11" Text="dht · ≤ 8 days" />
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

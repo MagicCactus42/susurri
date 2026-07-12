@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Application\Susurri.Modules.IAM.Application.csproj" />
     <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Core\Susurri.Modules.IAM.Core.csproj" />
     <ProjectReference Include="..\..\Modules\DHT\Susurri.Modules.DHT.Core\Susurri.Modules.DHT.Core.csproj" />

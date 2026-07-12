@@ -1,44 +1,49 @@
 using System;
-using System.Security.Cryptography;
-using System.Text;
-using System.Windows.Input;
-using dotnetstandard_bip39;
+using System.Linq;
+using System.Threading.Tasks;
 using Susurri.GUI.Services;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.GUI.ViewModels;
 
 public class LoginViewModel : ViewModelBase
 {
-    private readonly AppState _appState;
-    private readonly Action _onLoginSuccess;
+    private readonly AppSession _session;
+    private readonly Action _onLoggedIn;
+    private readonly Action _onGenerate;
+
     private string _username = string.Empty;
     private string _passphrase = string.Empty;
-    private string _errorMessage = string.Empty;
-    private string _generatedPassphrase = string.Empty;
-    private bool _isLoading;
-    private bool _showPassphrase;
-    private bool _cacheCredentials;
+    private string _portText = string.Empty;
+    private string _cachePin = string.Empty;
+    private string _newCachePin = string.Empty;
+    private bool _saveCredentials;
+    private bool _isBusy;
+    private string _busyText = string.Empty;
+    private string _error = string.Empty;
 
-    public LoginViewModel(AppState appState, Action onLoginSuccess)
+    public LoginViewModel(AppSession session, Action onLoggedIn, Action onGenerate)
     {
-        _appState = appState;
-        _onLoginSuccess = onLoginSuccess;
+        _session = session;
+        _onLoggedIn = onLoggedIn;
+        _onGenerate = onGenerate;
+        CacheAvailable = session.CacheExists;
 
-        LoginCommand = new RelayCommand(Login, CanLogin);
-        SignupCommand = new RelayCommand(Signup, CanLogin);
-        GeneratePassphraseCommand = new RelayCommand(GeneratePassphrase);
-        CopyAndUseCommand = new RelayCommand(CopyAndUse);
-        TogglePassphraseVisibilityCommand = new RelayCommand(TogglePassphraseVisibility);
+        LoginCommand = new RelayCommand(() => _ = LoginAsync(), () => !IsBusy);
+        UnlockCacheCommand = new RelayCommand(() => _ = UnlockCacheAsync(), () => !IsBusy);
+        GenerateCommand = new RelayCommand(() => _onGenerate());
     }
+
+    public bool CacheAvailable { get; }
+
+    public RelayCommand LoginCommand { get; }
+    public RelayCommand UnlockCacheCommand { get; }
+    public RelayCommand GenerateCommand { get; }
 
     public string Username
     {
         get => _username;
-        set
-        {
-            if (SetField(ref _username, value))
-                ((RelayCommand)LoginCommand).RaiseCanExecuteChanged();
-        }
+        set => SetField(ref _username, value);
     }
 
     public string Passphrase
@@ -47,160 +52,154 @@ public class LoginViewModel : ViewModelBase
         set
         {
             if (SetField(ref _passphrase, value))
-                ((RelayCommand)LoginCommand).RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(WordCountText));
         }
     }
 
-    public string ErrorMessage
+    public string WordCountText
     {
-        get => _errorMessage;
-        set
+        get
         {
-            if (SetField(ref _errorMessage, value))
+            var count = _passphrase.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+            return $"BIP39 · {count} / {SecurityLimits.MinPassphraseWords}+ words";
+        }
+    }
+
+    public string PortText
+    {
+        get => _portText;
+        set => SetField(ref _portText, value);
+    }
+
+    public string CachePin
+    {
+        get => _cachePin;
+        set => SetField(ref _cachePin, value);
+    }
+
+    public string NewCachePin
+    {
+        get => _newCachePin;
+        set => SetField(ref _newCachePin, value);
+    }
+
+    public bool SaveCredentials
+    {
+        get => _saveCredentials;
+        set => SetField(ref _saveCredentials, value);
+    }
+
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set
+        {
+            if (!SetField(ref _isBusy, value))
+                return;
+            LoginCommand.RaiseCanExecuteChanged();
+            UnlockCacheCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public string BusyText
+    {
+        get => _busyText;
+        private set => SetField(ref _busyText, value);
+    }
+
+    public string Error
+    {
+        get => _error;
+        private set
+        {
+            if (SetField(ref _error, value))
                 OnPropertyChanged(nameof(HasError));
         }
     }
 
-    public string GeneratedPassphrase
+    public bool HasError => !string.IsNullOrEmpty(_error);
+
+    private async Task UnlockCacheAsync()
     {
-        get => _generatedPassphrase;
-        set
+        Error = string.Empty;
+        if (string.IsNullOrEmpty(CachePin))
         {
-            if (SetField(ref _generatedPassphrase, value))
-                OnPropertyChanged(nameof(HasGeneratedPassphrase));
-        }
-    }
-
-    public bool IsLoading
-    {
-        get => _isLoading;
-        set => SetField(ref _isLoading, value);
-    }
-
-    public bool ShowPassphrase
-    {
-        get => _showPassphrase;
-        set => SetField(ref _showPassphrase, value);
-    }
-
-    public bool CacheCredentials
-    {
-        get => _cacheCredentials;
-        set => SetField(ref _cacheCredentials, value);
-    }
-
-    public bool HasGeneratedPassphrase => !string.IsNullOrEmpty(GeneratedPassphrase);
-    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
-    public string StatusMessage => ErrorMessage;
-
-    public ICommand LoginCommand { get; }
-    public ICommand SignupCommand { get; }
-    public ICommand GeneratePassphraseCommand { get; }
-    public ICommand CopyAndUseCommand { get; }
-    public ICommand TogglePassphraseVisibilityCommand { get; }
-
-    private bool CanLogin()
-    {
-        return !string.IsNullOrWhiteSpace(Username) &&
-               !string.IsNullOrWhiteSpace(Passphrase) &&
-               !IsLoading;
-    }
-
-    private void Login()
-    {
-        ErrorMessage = string.Empty;
-
-        if (Username.Length < 3 || Username.Length > 32)
-        {
-            ErrorMessage = "Username must be 3-32 characters";
+            Error = "Enter the cache password.";
             return;
         }
 
-        var words = Passphrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length < 6)
+        var cached = _session.TryLoadCached(CachePin);
+        if (cached == null)
         {
-            ErrorMessage = "Passphrase must contain at least 6 words";
+            Error = "Could not unlock the cached credentials — wrong password or corrupt cache.";
             return;
         }
 
+        Username = cached.Value.Username;
+        Passphrase = cached.Value.Passphrase;
+        await LoginAsync(skipCacheSave: true);
+    }
+
+    private async Task LoginAsync(bool skipCacheSave = false)
+    {
+        Error = string.Empty;
+
+        var username = Username.Trim();
+        if (username.Length < SecurityLimits.MinUsernameLength || username.Length > SecurityLimits.MaxUsernameLength)
+        {
+            Error = $"Username must be {SecurityLimits.MinUsernameLength}-{SecurityLimits.MaxUsernameLength} characters.";
+            return;
+        }
+        if (username.Any(c => !char.IsLetterOrDigit(c) && c != '_' && c != '-'))
+        {
+            Error = "Username may only contain letters, digits, underscores, and hyphens.";
+            return;
+        }
+
+        var words = Passphrase.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        if (words < SecurityLimits.MinPassphraseWords)
+        {
+            Error = $"Passphrase must be at least {SecurityLimits.MinPassphraseWords} words — generate one if you don't have an identity yet.";
+            return;
+        }
+        if (words > SecurityLimits.MaxPassphraseWords)
+        {
+            Error = $"Passphrase cannot exceed {SecurityLimits.MaxPassphraseWords} words.";
+            return;
+        }
+
+        var port = 0;
+        if (!string.IsNullOrWhiteSpace(PortText) &&
+            (!int.TryParse(PortText.Trim(), out port) || port < 0 || port > 65535))
+        {
+            Error = "Port must be a number between 1 and 65535, or empty for automatic.";
+            return;
+        }
+
+        IsBusy = true;
         try
         {
-            IsLoading = true;
+            var progress = new Progress<string>(s => BusyText = s);
+            await _session.LoginAsync(username, Passphrase, port, progress);
 
-            // Generate deterministic public key from passphrase
-            var publicKey = DerivePublicKey(Passphrase);
+            if (!skipCacheSave && SaveCredentials)
+            {
+                if (NewCachePin.Length >= 8)
+                    await _session.SaveCacheAsync(username, Passphrase, NewCachePin);
+                else
+                    Error = "Cache password too short (8+ chars) — credentials were not cached.";
+            }
 
-            _appState.Login(Username, publicKey);
-            _appState.CredentialsCached = CacheCredentials;
-
-            _onLoginSuccess();
+            _onLoggedIn();
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Login failed: {ex.Message}";
+            Error = $"Login failed: {ex.Message}";
         }
         finally
         {
-            IsLoading = false;
+            IsBusy = false;
+            BusyText = string.Empty;
         }
-    }
-
-    private void GeneratePassphrase()
-    {
-        try
-        {
-            var entropy = new byte[16]; // 128 bits for 12 words
-            RandomNumberGenerator.Fill(entropy);
-            var entropyHex = Convert.ToHexString(entropy).ToLowerInvariant();
-
-            var bip = new BIP39();
-            GeneratedPassphrase = string.Join(" ", bip.EntropyToMnemonic(entropyHex, BIP39Wordlist.English)
-                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        }
-        catch (Exception ex)
-        {
-            ErrorMessage = $"Failed to generate passphrase: {ex.Message}";
-        }
-    }
-
-    private void Signup()
-    {
-        // For now, signup works the same as login - it creates a new identity
-        Login();
-    }
-
-    private async void CopyAndUse()
-    {
-        if (string.IsNullOrEmpty(GeneratedPassphrase)) return;
-
-        try
-        {
-            var topLevel = Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                ? desktop.MainWindow
-                : null;
-
-            if (topLevel?.Clipboard != null)
-            {
-                await topLevel.Clipboard.SetTextAsync(GeneratedPassphrase);
-            }
-            Passphrase = GeneratedPassphrase;
-        }
-        catch
-        {
-            // Clipboard access may fail on some systems
-            Passphrase = GeneratedPassphrase;
-        }
-    }
-
-    private void TogglePassphraseVisibility()
-    {
-        ShowPassphrase = !ShowPassphrase;
-    }
-
-    private static byte[] DerivePublicKey(string passphrase)
-    {
-        var passphraseBytes = Encoding.UTF8.GetBytes(passphrase);
-        var hash = SHA256.HashData(passphraseBytes);
-        return hash;
     }
 }
