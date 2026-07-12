@@ -140,7 +140,7 @@ jobs:
 
       - name: upload format report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: format-report
           path: |
