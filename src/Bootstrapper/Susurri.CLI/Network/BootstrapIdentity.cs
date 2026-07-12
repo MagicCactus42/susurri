@@ -43,39 +43,67 @@ internal static class BootstrapIdentity
         {
             if (configured.Length == 64 && configured.All(Uri.IsHexDigit))
                 return Convert.FromHexString(configured);
-            ConsoleUi.PrintWarning("DHT:Bootstrap:IdentitySeed must be 64 hex characters — falling back to the persisted seed.");
+            ConsoleUi.PrintWarning("DHT:Bootstrap:IdentitySeed must be 64 hex characters — falling back to a generated seed.");
         }
 
-        return LoadOrCreatePersistedSeed();
+        return TryLoadOrCreatePersistedSeed() ?? RandomNumberGenerator.GetBytes(32);
     }
 
-    private static byte[] LoadOrCreatePersistedSeed()
+    private static byte[]? TryLoadOrCreatePersistedSeed()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Susurri");
-        Directory.CreateDirectory(directory);
-        LocalEncryption.RestrictDirectory(directory);
-
-        var path = Path.Combine(directory, "node-identity.seed");
-        if (File.Exists(path))
+        try
         {
-            var existing = File.ReadAllText(path).Trim();
-            if (existing.Length == 64 && existing.All(Uri.IsHexDigit))
-                return Convert.FromHexString(existing);
+            var directory = ResolveStorageDirectory();
+            if (directory == null)
+                return null;
+
+            Directory.CreateDirectory(directory);
+            LocalEncryption.RestrictDirectory(directory);
+
+            var path = Path.Combine(directory, "node-identity.seed");
+            if (File.Exists(path))
+            {
+                var existing = File.ReadAllText(path).Trim();
+                if (existing.Length == 64 && existing.All(Uri.IsHexDigit))
+                    return Convert.FromHexString(existing);
+            }
+
+            var seed = RandomNumberGenerator.GetBytes(32);
+            File.WriteAllText(path, Convert.ToHexString(seed).ToLowerInvariant());
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                catch
+                {
+                }
+            }
+            return seed;
+        }
+        catch
+        {
+            ConsoleUi.PrintWarning(
+                "Could not persist a stable node identity — using an ephemeral one for this run. " +
+                "Set DHT__Bootstrap__IdentitySeed to pin it.");
+            return null;
+        }
+    }
+
+    private static string? ResolveStorageDirectory()
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (string.IsNullOrEmpty(appData))
+        {
+            var home = Environment.GetEnvironmentVariable("HOME");
+            if (!string.IsNullOrEmpty(home))
+                appData = Path.Combine(home, ".config");
         }
 
-        var seed = RandomNumberGenerator.GetBytes(32);
-        File.WriteAllText(path, Convert.ToHexString(seed).ToLowerInvariant());
-        if (!OperatingSystem.IsWindows())
-        {
-            try
-            {
-                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
-            catch
-            {
-            }
-        }
-        return seed;
+        if (string.IsNullOrEmpty(appData) || !Path.IsPathRooted(appData))
+            return null;
+
+        return Path.Combine(appData, "Susurri");
     }
 }
