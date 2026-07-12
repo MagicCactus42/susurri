@@ -126,6 +126,10 @@ sequenceDiagram
 
 By default everything lives in RAM and a restart forgets it. `history on` persists conversations to disk, encrypted with a key derived from your passphrase seed (AES-256-GCM; the key never touches disk). `history off` shreds the store. Group ratchet state and group keys are persisted the same way, so forward secrecy survives restarts instead of resetting.
 
+### File transfer
+
+`file send <user> <path>` offers any file — PDF, image, archive, anything — to a recipient, who explicitly accepts (`file accept`) or rejects it before a byte flows. The file is split into ~15.8 KB chunks that each ride the **same padded onion transport as messages**, so file traffic is indistinguishable on the wire; every frame is Ed25519-signed and the reassembled file is SHA-256-verified against the sender's declared hash. Chunks travel as independent onion messages and can arrive out of order — the receiver tolerates that and finalizes once the set is complete. Received files land in your downloads folder. It's built for documents and images, not bulk data: each chunk takes its own 3-hop route with per-relay mixing delay, so throughput is ~1 MB/min (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) §1.6).
+
 ## Cryptography
 
 | Purpose | Primitive |
@@ -143,13 +147,14 @@ All primitives via [NSec](https://nsec.rocks/) (libsodium). Constant-time compar
 
 ```
 src/Bootstrapper/Susurri.CLI/     cross-platform CLI + bootstrap seed mode
-src/Bootstrapper/Susurri.Bootstrapper/  WPF demo (Windows only)
+src/Bootstrapper/Susurri.GUI/     desktop client (Avalonia) — same ChatService backend as the CLI
+src/Bootstrapper/Susurri.Bootstrapper/  WPF demo (Windows only, legacy)
 src/Modules/DHT/                  Kademlia, onion routing, ratchet, NAT traversal, groups
 src/Modules/IAM/                  key derivation, encrypted key storage
 src/Modules/Users/                user persistence (EF Core + PostgreSQL)
 tests/                            xUnit test suites
 deploy/                           bootstrap node: systemd unit + VPS scripts
-installers/                       Arch PKGBUILD, Windows installer
+installers/                       Arch PKGBUILD, Windows release pipeline docs (Velopack)
 ```
 
 On Linux build the CLI project directly — the WPF project targets `net10.0-windows` and won't compile:
@@ -172,6 +177,21 @@ The network needs at least one seed at a known address — an ordinary DHT node 
 - Bootstrap seeds are a trust-on-first-use entry point; run several.
 
 Details and remediation phases: [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).
+
+## Verifying a release
+
+Every release ships a `SHA256SUMS` manifest signed with the Susurri release key. Compare the fingerprint against a second channel — this README and [susurri.org](https://susurri.org) pin the same key, and a page can lie while two independent channels rarely lie the same way:
+
+```
+uid   Susurri releases <releases@susurri.org>
+fpr   AE4C 7B5E 0906 F166 0ABF  6B6D 3303 0F45 01C1 F505
+```
+
+```
+gpg --recv-keys AE4C7B5E0906F1660ABF6B6D33030F4501C1F505
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS
+```
 
 ## License
 
