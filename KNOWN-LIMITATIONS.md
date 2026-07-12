@@ -13,15 +13,26 @@ already done.
 
 ## Phase 1 deferrals
 
-### 1.6 File transfer: in-memory accumulation
-- **What:** `FileTransferService` keeps the entire outgoing file in `byte[]` memory
-  and accumulates incoming chunks in `ConcurrentDictionary<int, byte[]>` until
-  reassembly. With the 100 MB cap (Phase 1) this is bounded but inefficient.
-- **Why deferred:** the 100 MB cap closes the OOM-DoS vector that mattered for
-  Phase 1 security; switching to a temp-file streaming model is a substantial
-  refactor with its own correctness surface.
-- **Target:** **Phase 2 follow-up** — stream chunks to a `FileStream` opened
-  with `FileOptions.DeleteOnClose` instead of holding chunks in memory.
+### 1.6 File transfer: in-memory accumulation & no retransmission
+- **What:** File transfer is wired end-to-end (`file send/accept/reject/list` in
+  the CLI, request→accept→chunk→complete over the same padded onion transport as
+  messages, Ed25519-signed, SHA-256 verified on reassembly). Two shortcomings
+  remain: (1) `FileTransferService` keeps the whole outgoing file in `byte[]` and
+  accumulates incoming chunks in memory until reassembly — bounded by the 100 MB
+  cap but not streamed; (2) delivery is **best-effort with no chunk
+  retransmission** — the receiver tolerates *reordering* (Complete may overtake a
+  late chunk; it finalizes when the set fills, or the janitor times the transfer
+  out after 30 min), but a genuinely dropped chunk is never re-requested, so the
+  transfer stalls to timeout. On the reliable-UDP loopback/LAN path drops are
+  rare; over lossy internet paths they are not.
+- **Why deferred:** the 100 MB cap closes the OOM-DoS vector; streaming to disk
+  and a selective-ACK/retransmit layer are each substantial refactors with their
+  own correctness surface.
+- **Throughput:** every chunk (~15.8 KB) rides its own fresh 3-hop onion route
+  with a deliberate 50–500 ms delay per relay, so effective throughput is on the
+  order of ~1 MB/min — this is for documents and images, not bulk data.
+- **Target:** **Phase 2 follow-up** — stream chunks to a `FileStream`
+  (`FileOptions.DeleteOnClose`) and add a per-transfer missing-chunk re-request.
 
 ### 1.8 Forward secrecy ratchet
 - **What:** Direct messages run a per-peer double ratchet
@@ -197,6 +208,47 @@ attempted. They are documented in
   step that installs AFL, runs `sharpfuzz` against the published assembly,
   loops `afl-fuzz -V 300` over each target, fails on any output in
   `findings/*/crashes/`, and uploads `findings/` as an artifact.
+
+---
+
+## Threat-model limitations
+
+### No traffic-analysis resistance (no cover traffic / mixing / batching)
+- **What:** timing-correlation resistance rests solely on the per-hop 50–500 ms
+  onion mixing delay (drawn from a CSPRNG) plus 16 KB message-size padding. There
+  is no cover/decoy traffic, no batching, and no per-chunk jitter: file chunks are
+  emitted sequentially, so a global passive observer can count and size-correlate
+  a transfer end-to-end and can attempt timing correlation across a single 3-hop
+  path.
+- **Why deferred:** cover traffic, batching, and mix-style delays are a distinct
+  design phase with their own bandwidth/latency trade-offs, out of scope for the
+  current best-effort onion transport.
+- **Target:** future phase — evaluate cover traffic / batching / per-chunk jitter.
+
+### Relay-registration ownership is not cryptographically proven
+- **What:** the UDP relay-fallback path (peers behind symmetric NAT on both sides)
+  rate-limits relay frames per source IP, caps the registration table with
+  oldest-eviction, and refuses to let a different source overwrite a live
+  registration. It does **not** yet cryptographically prove node-id ownership at
+  registration; UDP source addresses are spoofable, so a challenge-response
+  handshake (relay issues a nonce, node signs it) is needed to fully close
+  pre-emptive squatting of an offline peer's node-id.
+- **Why deferred:** a signed challenge-response is a protocol addition; the
+  rate-limit + cap + same-source-rebind guard already removes the reflection/
+  amplification, memory-exhaustion, and live-hijack vectors.
+- **Target:** future phase — signed relay-registration challenge-response.
+
+### DHT admission has no proof-of-work or liveness pre-check
+- **What:** node ids are bound to their public key (`id == SHA256(pubkey)`) at
+  every routing-table insertion, and k-bucket admission caps entries per public
+  /24 (IPv6 /48) prefix. There is still no proof-of-work on node-id minting and no
+  pre-insertion liveness PING, so a Sybil adversary spread across many distinct
+  public subnets can still populate buckets — just not from a single subnet nor
+  with key-unbound ids.
+- **Why deferred:** PoW and an async liveness handshake on the insert path are
+  larger changes; the id↔key binding and prefix cap remove the cheapest poisoning
+  vectors.
+- **Target:** future phase — optional node-id PoW and liveness pre-check.
 
 ---
 

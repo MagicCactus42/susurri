@@ -160,6 +160,20 @@ persists them to an encrypted local store (key derived from your passphrase, per
 identity); `history off` shreds it; `history` shows status. The `chats` browser
 picks stored conversations up automatically on the next login.
 
+### Files
+
+```bash
+# > file send bob ~/docs/report.pdf     (offers the file; bob must accept)
+# bob> file list                         (see the incoming offer + its id)
+# bob> file accept 3f9a1c22              (id prefix is enough; chunks start flowing)
+# bob> file list                         (watch progress; lands in ~/Downloads/susurri/)
+```
+
+`sendfile bob ~/report.pdf` is shorthand for `file send`. Transfers use the same
+onion transport as messages (so you need a working route — see the loopback note
+above for local testing), are capped at 100 MB, and run ~1 MB/min because every
+chunk takes its own mixed 3-hop path.
+
 ## Identity
 
 Your identity is derived entirely from your passphrase and username
