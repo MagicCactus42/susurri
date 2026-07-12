@@ -6,7 +6,9 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using Serilog;
 using Serilog.Events;
+using Serilog.Formatting;
 using Serilog.Formatting.Compact;
+using Serilog.Formatting.Display;
 using Susurri.CLI.Logging;
 using Susurri.Shared.Abstractions.Diagnostics;
 using Susurri.Shared.Abstractions.Modules;
@@ -67,16 +69,16 @@ internal static class CliHost
                 .Enrich.WithProperty("Environment", environment)
                 .MinimumLevel.Is(LogEventLevel.Verbose);
 
-            if (isProduction)
-            {
-                serilog.WriteTo.Console(new CompactJsonFormatter(), standardErrorFromLevel: LogEventLevel.Error);
-            }
-            else
-            {
-                const string outputTemplate =
-                    "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {SourceContext} {TraceId}: {Message:lj}{NewLine}{Exception}";
-                serilog.WriteTo.Console(outputTemplate: outputTemplate, standardErrorFromLevel: LogEventLevel.Error);
-            }
+            const string outputTemplate =
+                "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {SourceContext} {TraceId}: {Message:lj}{NewLine}{Exception}";
+            ITextFormatter formatter = isProduction
+                ? new CompactJsonFormatter()
+                : new MessageTemplateTextFormatter(outputTemplate, formatProvider: null);
+
+            if (configuration.GetValue("Logging:RedactNetworkIdentifiers", false))
+                formatter = new RedactingTextFormatter(formatter);
+
+            serilog.WriteTo.Console(formatter, standardErrorFromLevel: LogEventLevel.Error);
 
             builder.AddSerilog(serilog.CreateLogger(), dispose: true);
         });

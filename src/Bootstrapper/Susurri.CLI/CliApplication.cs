@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Susurri.CLI.Commands;
 using Susurri.CLI.Health;
+using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Node;
 using Susurri.Shared.Abstractions.Health;
 using Susurri.Shared.Infrastructure.Health;
@@ -46,6 +47,7 @@ internal sealed class CliApplication : IAsyncDisposable
         registry.Register(new ChatsCommand(session));
         registry.Register(new ContactsCommand(session));
         registry.Register(new HistoryCommand(session));
+        registry.Register(new FileCommand(session));
         registry.Register(new VersionCommand());
         registry.Register(new ClearScreenCommand());
         registry.Register(new ExitCommand());
@@ -63,15 +65,12 @@ internal sealed class CliApplication : IAsyncDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            ConsoleUi.PrintPrompt(_session.CurrentUser);
-
             string? raw;
             try
             {
-                // ReadLineAsync(ct) honors the cancellation token on .NET 7+;
-                // on Linux TTYs the underlying read may not unblock until the
-                // user presses Enter, but the loop condition will exit cleanly.
-                raw = await Console.In.ReadLineAsync(ct).ConfigureAwait(false);
+                raw = await ConsoleLineReader.Shared
+                    .ReadLineAsync(ConsoleUi.BuildPrompt(_session.CurrentUser), ct)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -123,7 +122,7 @@ internal sealed class CliApplication : IAsyncDisposable
         Console.WriteLine();
 
         var dhtCommand = (DhtCommand)_registry.All.First(c => c is DhtCommand);
-        await dhtCommand.StartAsync(new[] { port.ToString() }).ConfigureAwait(false);
+        await dhtCommand.StartAsync(new[] { port.ToString() }, stableIdentity: true).ConfigureAwait(false);
 
         if (_session.DhtNode == null)
         {
@@ -132,6 +131,21 @@ internal sealed class CliApplication : IAsyncDisposable
         }
 
         ConsoleUi.PrintSuccess($"Bootstrap node running on port {port}");
+
+        if (_session.Attestation is { } attestation)
+        {
+            attestation.WriteToDisk();
+            Console.WriteLine();
+            ConsoleUi.Panel("node attestation", new[]
+            {
+                ("fingerprint", attestation.FingerprintShort, Palette.Mauve),
+                ("node id", attestation.NodeId[..Math.Min(16, attestation.NodeId.Length)], Palette.Text),
+                ("signing key", attestation.SigningPublicKey[..16], Palette.Text),
+                ("version", attestation.Version, Palette.Text)
+            }, Palette.Mauve);
+            Console.WriteLine($"  {ConsoleUi.Faint("full fingerprint: " + attestation.Fingerprint)}");
+            Console.WriteLine($"  {ConsoleUi.Faint("pin this in the client's BootstrapRegistry so peers can verify this node")}");
+        }
 
         await using var healthServer = StartHealthServerIfEnabled();
 
@@ -165,7 +179,8 @@ internal sealed class CliApplication : IAsyncDisposable
         var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
         var checks = new IHealthCheck[] { new NodeServerRunningCheck(_session) };
         var service = new HealthCheckService(checks);
-        var server = new HealthHttpServer(service, loggerFactory.CreateLogger<HealthHttpServer>(), address, healthPort);
+        var server = new HealthHttpServer(
+            service, loggerFactory.CreateLogger<HealthHttpServer>(), address, healthPort, _session.Attestation);
 
         try
         {

@@ -1,3 +1,4 @@
+using Susurri.CLI.Network;
 using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Services;
@@ -21,6 +22,7 @@ internal sealed class SessionState : IAsyncDisposable
 
     public KademliaDhtNode? DhtNode { get; private set; }
     public CancellationTokenSource? DhtCts { get; private set; }
+    public NodeAttestation? Attestation { get; set; }
 
     public void SetChat(string username, ChatService chat, ConversationStore conversations, HistoryStore? history = null)
     {

@@ -20,6 +20,7 @@ public sealed class HealthHttpServer : IAsyncDisposable
     private readonly HttpListener _listener;
     private readonly HealthCheckService _checkService;
     private readonly ILogger<HealthHttpServer> _logger;
+    private readonly IAttestationProvider? _attestation;
     private readonly string _bindUrl;
     private CancellationTokenSource? _cts;
     private Task? _runLoop;
@@ -28,10 +29,12 @@ public sealed class HealthHttpServer : IAsyncDisposable
         HealthCheckService checkService,
         ILogger<HealthHttpServer> logger,
         string listenAddress = "127.0.0.1",
-        int port = 7071)
+        int port = 7071,
+        IAttestationProvider? attestation = null)
     {
         _checkService = checkService;
         _logger = logger;
+        _attestation = attestation;
         _bindUrl = $"http://{listenAddress}:{port}/";
         _listener = new HttpListener();
         _listener.Prefixes.Add(_bindUrl);
@@ -91,6 +94,14 @@ public sealed class HealthHttpServer : IAsyncDisposable
                     var statusCode = report.Overall == HealthStatus.Healthy ? 200 : 503;
                     var body = SerializeReadyResponse(report);
                     await WriteJsonAsync(context.Response, statusCode, body, ct).ConfigureAwait(false);
+                    break;
+
+                case "/attest":
+                    var attestJson = _attestation?.AttestationJson;
+                    if (string.IsNullOrEmpty(attestJson))
+                        await WriteJsonAsync(context.Response, 404, "{\"error\":\"no-attestation\"}", ct).ConfigureAwait(false);
+                    else
+                        await WriteJsonAsync(context.Response, 200, attestJson, ct).ConfigureAwait(false);
                     break;
 
                 default:

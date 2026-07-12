@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NSec.Cryptography;
+using Susurri.CLI.Network;
 using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 
@@ -61,7 +62,7 @@ internal sealed class DhtCommand : ICommand
         return true;
     }
 
-    public async Task StartAsync(string[] args)
+    public async Task StartAsync(string[] args, bool stableIdentity = false)
     {
         if (_session.DhtNode != null)
         {
@@ -89,10 +90,19 @@ internal sealed class DhtCommand : ICommand
             var publicEndpoint = NodeConfig.ParseEndpoint(config["DHT:Nat:PublicEndpoint"]);
             var networkId = NodeConfig.NetworkId(config);
 
-            var encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
-                new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
-            var signingKey = Key.Create(SignatureAlgorithm.Ed25519,
-                new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+            Key encryptionKey;
+            Key signingKey;
+            if (stableIdentity)
+            {
+                (signingKey, encryptionKey) = BootstrapIdentity.Derive(config);
+            }
+            else
+            {
+                encryptionKey = Key.Create(KeyAgreementAlgorithm.X25519,
+                    new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+                signingKey = Key.Create(SignatureAlgorithm.Ed25519,
+                    new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+            }
 
             var node = new KademliaDhtNode(encryptionKey, logger, signingKey,
                 natTraversal: null, enableUdpTransport: udpEnabled, useStun: useStun,
@@ -102,6 +112,24 @@ internal sealed class DhtCommand : ICommand
             await ConsoleUi.WithSpinnerAsync($"starting dht node on port {port}",
                 () => node.StartAsync(port)).ConfigureAwait(false);
             _session.SetDhtNode(node, cts);
+
+            if (stableIdentity)
+            {
+                var inputs = new BootstrapConfigInputs(
+                    port,
+                    config.GetValue("DHT:Bootstrap:EnableRelay", true),
+                    config.GetValue("DHT:Bootstrap:EnableOfflineStorage", true),
+                    config.GetValue("DHT:Bootstrap:StorageLimitMB", 256),
+                    config.GetValue("DHT:Bootstrap:MaxConnections", 500),
+                    networkId);
+                _session.Attestation = NodeAttestation.Compute(
+                    signingKey,
+                    node.LocalId.ToString(),
+                    node.SigningPublicKey,
+                    node.EncryptionPublicKey,
+                    inputs,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            }
 
             if (seeds.Count > 0)
                 await ConsoleUi.WithSpinnerAsync($"bootstrapping against {seeds.Count} seed node(s)",

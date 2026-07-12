@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Susurri.CLI.Network;
 using Susurri.CLI.Tui;
 using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Network;
@@ -68,12 +69,14 @@ internal sealed class LoginCommand : ICommand
                 loggerFactory.CreateLogger<ConnectionManager>(),
                 keyPair.SigningKey,
                 options,
-                keyPair.LocalStoreKey);
+                keyPair.LocalStoreKey,
+                loggerFactory.CreateLogger<FileTransferService>());
 
             chat.OnMessageReceived += received =>
             {
                 if (!_session.TuiActive)
-                    ConsoleUi.PrintIncoming(received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16], received.Content);
+                    ConsoleLineReader.Shared.WriteInterrupting(() =>
+                        ConsoleUi.PrintIncoming(received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16], received.Content));
                 return Task.CompletedTask;
             };
 
@@ -82,8 +85,50 @@ internal sealed class LoginCommand : ICommand
                 if (!_session.TuiActive)
                 {
                     var sender = received.SenderUsername ?? Convert.ToHexString(received.SenderPublicKey)[..16];
-                    ConsoleUi.PrintIncoming($"{received.GroupName}/{sender}", received.Content);
+                    ConsoleLineReader.Shared.WriteInterrupting(() =>
+                        ConsoleUi.PrintIncoming($"{received.GroupName}/{sender}", received.Content));
                 }
+                return Task.CompletedTask;
+            };
+
+            chat.OnFileTransferRequested += info =>
+            {
+                if (!_session.TuiActive)
+                {
+                    ConsoleLineReader.Shared.WriteInterrupting(() =>
+                    {
+                        Console.WriteLine();
+                        ConsoleUi.PrintInfo(
+                            $"📎 Incoming file '{info.FileName}' ({FileCommand.FormatBytes(info.FileSize)}) " +
+                            $"— accept with 'file accept {info.TransferId.ToString()[..8]}' or 'file reject ...'");
+                    });
+                }
+                return Task.CompletedTask;
+            };
+
+            chat.OnFileTransferCompleted += done =>
+            {
+                if (_session.TuiActive)
+                    return Task.CompletedTask;
+                try
+                {
+                    var path = Downloads.Save(done.FileName, done.FileData);
+                    ConsoleLineReader.Shared.WriteInterrupting(() =>
+                        ConsoleUi.PrintSuccess($"Received '{done.FileName}' → {path}"));
+                }
+                catch (Exception ex)
+                {
+                    ConsoleLineReader.Shared.WriteInterrupting(() =>
+                        ConsoleUi.PrintError($"Received '{done.FileName}' but could not save it: {ex.Message}"));
+                }
+                return Task.CompletedTask;
+            };
+
+            chat.OnFileTransferFailed += (_, reason) =>
+            {
+                if (!_session.TuiActive)
+                    ConsoleLineReader.Shared.WriteInterrupting(() =>
+                        ConsoleUi.PrintWarning($"File transfer failed: {reason}"));
                 return Task.CompletedTask;
             };
 
@@ -92,12 +137,14 @@ internal sealed class LoginCommand : ICommand
                 : null;
             var conversations = new ConversationStore(chat, username, history);
 
-            var seeds = NodeConfig.Seeds(config, Array.Empty<string>())
-                .Select(e => $"{e.Address}:{e.Port}");
+            var seedEndpoints = NodeConfig.Seeds(config, Array.Empty<string>());
+            var seeds = seedEndpoints.Select(e => $"{e.Address}:{e.Port}");
 
             await ConsoleUi.WithSpinnerAsync("joining the network (dht bootstrap + onion setup)",
                 () => chat.StartAsync(port, username, seeds)).ConfigureAwait(false);
             _session.SetChat(username, chat, conversations, history);
+
+            await VerifyPinnedSeedsAsync(seedEndpoints, ct).ConfigureAwait(false);
 
             if (wantsCache && !string.IsNullOrEmpty(cachePin))
             {
@@ -129,6 +176,44 @@ internal sealed class LoginCommand : ICommand
         }
 
         return true;
+    }
+
+    private static async Task VerifyPinnedSeedsAsync(IEnumerable<System.Net.IPEndPoint> seeds, CancellationToken ct)
+    {
+        IReadOnlyList<AttestationResult> results;
+        try
+        {
+            results = await BootstrapVerifier.VerifyPinnedAsync(seeds, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var result in results)
+        {
+            switch (result.Status)
+            {
+                case AttestationStatus.Verified:
+                    ConsoleUi.PrintSuccess($"bootstrap {result.Endpoint} verified — attestation matches the pinned fingerprint {result.FingerprintShort}");
+                    break;
+                case AttestationStatus.Unreachable:
+                    ConsoleUi.PrintWarning($"bootstrap {result.Endpoint} is pinned but its attestation endpoint is unreachable — could not verify");
+                    break;
+                case AttestationStatus.FingerprintMismatch:
+                    ConsoleUi.PrintError($"bootstrap {result.Endpoint} FINGERPRINT MISMATCH — the node's config or binary differs from the pin; treat with suspicion");
+                    break;
+                case AttestationStatus.KeyMismatch:
+                    ConsoleUi.PrintError($"bootstrap {result.Endpoint} IDENTITY KEY MISMATCH — this is not the node you pinned; possible impersonation");
+                    break;
+                case AttestationStatus.SignatureInvalid:
+                    ConsoleUi.PrintError($"bootstrap {result.Endpoint} SIGNATURE INVALID — the attestation is not signed by the pinned key");
+                    break;
+                default:
+                    ConsoleUi.PrintWarning($"bootstrap {result.Endpoint} returned a malformed attestation");
+                    break;
+            }
+        }
     }
 
     private (string? Username, string? Passphrase, string? CachePin, bool WantsCache) ResolveCredentials(string[] args)
