@@ -454,6 +454,12 @@ public sealed class FileTransferService : IDisposable
             return;
         }
 
+        if (!accept.SenderPublicKey.AsSpan().SequenceEqual(transfer.RecipientPublicKey))
+        {
+            _logger.LogWarning("Accept for transfer {TransferId} from wrong sender; ignoring", accept.TransferId);
+            return;
+        }
+
         _logger.LogInformation("Transfer {TransferId} accepted, starting chunk send", accept.TransferId);
         transfer.Status = TransferStatus.Transferring;
 
@@ -463,7 +469,16 @@ public sealed class FileTransferService : IDisposable
 
     private void HandleTransferReject(FileTransferReject reject)
     {
-        if (_outgoing.TryRemove(reject.TransferId, out var transfer))
+        if (!_outgoing.TryGetValue(reject.TransferId, out var transfer))
+            return;
+
+        if (!reject.SenderPublicKey.AsSpan().SequenceEqual(transfer.RecipientPublicKey))
+        {
+            _logger.LogWarning("Reject for transfer {TransferId} from wrong sender; ignoring", reject.TransferId);
+            return;
+        }
+
+        if (_outgoing.TryRemove(reject.TransferId, out _))
         {
             transfer.Status = TransferStatus.Failed;
             _logger.LogInformation("Transfer {TransferId} rejected: {Reason}",
@@ -544,51 +559,69 @@ public sealed class FileTransferService : IDisposable
                 TotalChunks = transfer.ChunkCount
             }).ConfigureAwait(false);
         }
+
+        // Chunks and the completion marker travel as independent onion messages
+        // with per-hop random delays, so Complete routinely overtakes the last
+        // chunk. If it already arrived, a late chunk that fills the set finalizes.
+        if (Volatile.Read(ref transfer.CompleteReceived))
+            await TryFinalizeAsync(transfer).ConfigureAwait(false);
     }
 
     private async Task HandleTransferCompleteAsync(FileTransferComplete complete)
     {
-        if (!_incoming.TryRemove(complete.TransferId, out var transfer))
+        if (!_incoming.TryGetValue(complete.TransferId, out var transfer))
         {
             _logger.LogWarning("Received complete for unknown transfer {TransferId}", complete.TransferId);
             return;
         }
 
-        // Check if we have all chunks
-        if (transfer.ReceivedChunks.Count != transfer.ChunkCount)
+        // Complete means "sender is done emitting", not "you have everything now".
+        // Finalize if the set is already full; otherwise leave the transfer open
+        // for chunks still in flight (the janitor times it out if they never come).
+        Volatile.Write(ref transfer.CompleteReceived, true);
+        await TryFinalizeAsync(transfer).ConfigureAwait(false);
+
+        if (Volatile.Read(ref transfer.Finalized) == 0)
         {
-            _logger.LogWarning(
-                "Transfer {TransferId} completed but missing chunks: {Received}/{Total}",
-                complete.TransferId, transfer.ReceivedChunks.Count, transfer.ChunkCount);
-
-            transfer.Status = TransferStatus.Failed;
-            OnTransferFailed?.Invoke(complete.TransferId, "Missing chunks");
-            return;
+            _logger.LogDebug(
+                "Transfer {TransferId} complete received, awaiting {Missing} in-flight chunk(s)",
+                complete.TransferId, transfer.ChunkCount - transfer.ReceivedChunks.Count);
         }
+    }
 
-        // Reassemble file
+    private async Task TryFinalizeAsync(IncomingTransfer transfer)
+    {
+        if (transfer.ReceivedChunks.Count != transfer.ChunkCount)
+            return;
+
+        // Chunk arrival and the completion marker can race on separate threads;
+        // exactly one of them wins the right to reassemble.
+        if (Interlocked.CompareExchange(ref transfer.Finalized, 1, 0) != 0)
+            return;
+
+        _incoming.TryRemove(transfer.TransferId, out _);
+
         var fileData = ReassembleFile(transfer);
 
-        // Verify hash
         var actualHash = SHA256.HashData(fileData);
         if (!actualHash.SequenceEqual(transfer.FileHash))
         {
-            _logger.LogWarning("Transfer {TransferId} hash mismatch", complete.TransferId);
+            _logger.LogWarning("Transfer {TransferId} hash mismatch", transfer.TransferId);
             transfer.Status = TransferStatus.Failed;
-            OnTransferFailed?.Invoke(complete.TransferId, "File hash verification failed");
+            OnTransferFailed?.Invoke(transfer.TransferId, "File hash verification failed");
             return;
         }
 
         transfer.Status = TransferStatus.Completed;
 
         _logger.LogInformation("File transfer {TransferId} completed: {FileName} ({Size} bytes)",
-            complete.TransferId, transfer.FileName, fileData.Length);
+            transfer.TransferId, transfer.FileName, fileData.Length);
 
         if (OnTransferCompleted != null)
         {
             await OnTransferCompleted(new CompletedTransfer
             {
-                TransferId = complete.TransferId,
+                TransferId = transfer.TransferId,
                 FileName = transfer.FileName,
                 FileData = fileData,
                 SenderPublicKey = transfer.SenderPublicKey
@@ -724,6 +757,8 @@ public sealed class FileTransferService : IDisposable
         public long ReceivedBytes { get; set; }
         public TransferStatus Status { get; set; }
         public DateTimeOffset StartedAt { get; init; }
+        public bool CompleteReceived;
+        public int Finalized;
     }
 }
 

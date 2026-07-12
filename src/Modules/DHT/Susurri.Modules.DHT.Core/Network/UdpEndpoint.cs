@@ -16,6 +16,7 @@ public sealed class UdpEndpoint : IAsyncDisposable
     private static readonly byte[] RelayForwardMagic = { 0x53, 0x55, 0x52, 0x46 };  // "SURF"
     private static readonly byte[] RelayDeliverMagic = { 0x53, 0x55, 0x52, 0x44 };  // "SURD"
     private const int NodeIdSize = 32;
+    private const int MaxRegistrations = 4096;
     private static readonly TimeSpan RegistrationTtl = TimeSpan.FromSeconds(90);
     private const byte FrameData = 0x01;
     private const byte FrameAck = 0x02;
@@ -26,6 +27,7 @@ public sealed class UdpEndpoint : IAsyncDisposable
     private const int MaxRetransmits = 6;
     private static readonly TimeSpan CompletedRetention = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ReassemblyTimeout = TimeSpan.FromSeconds(15);
+    private const int MaxReassembliesPerSender = 64;
 
     private readonly ILogger _logger;
     private UdpClient? _client;
@@ -35,13 +37,15 @@ public sealed class UdpEndpoint : IAsyncDisposable
     private bool _disposed;
 
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<bool>> _outbound = new();
-    private readonly ConcurrentDictionary<string, Inbound> _inbound = new();
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _completed = new();
+    private readonly ConcurrentDictionary<ReassemblyKey, Inbound> _inbound = new();
+    private readonly ConcurrentDictionary<ReassemblyKey, DateTimeOffset> _completed = new();
+    private readonly ConcurrentDictionary<IPEndPoint, int> _inboundPerSender = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<IPEndPoint>> _punchSessions = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<IPEndPoint>> _stunPending = new();
 
     // Relay-server role: registered peers (nodeId -> their public endpoint).
     private readonly ConcurrentDictionary<string, (IPEndPoint Endpoint, DateTimeOffset Expiry)> _registrations = new();
+    private readonly RateLimiter _relayLimiter = new(maxTokens: 200, refillRatePerSecond: 100.0);
     // Relay-client role: a synthetic endpoint per relayed peer, so the reliable
     // layer treats each as a distinct peer; the route says how to reach it.
     private readonly ConcurrentDictionary<string, IPEndPoint> _relayedByNode = new();
@@ -108,7 +112,7 @@ public sealed class UdpEndpoint : IAsyncDisposable
             throw new ArgumentException($"Payload exceeds {SecurityLimits.MaxMessageSize} bytes", nameof(payload));
 
         var messageId = Guid.NewGuid();
-        var fragments = Fragment(payload);
+        var frames = BuildDataFrames(messageId, payload);
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _outbound[messageId] = tcs;
 
@@ -116,9 +120,8 @@ public sealed class UdpEndpoint : IAsyncDisposable
         {
             for (int attempt = 0; attempt <= MaxRetransmits; attempt++)
             {
-                for (int i = 0; i < fragments.Count; i++)
+                foreach (var frame in frames)
                 {
-                    var frame = BuildDataFrame(messageId, (ushort)fragments.Count, (ushort)i, fragments[i]);
                     try
                     {
                         await SendDatagramAsync(destination, frame).ConfigureAwait(false);
@@ -359,19 +362,22 @@ public sealed class UdpEndpoint : IAsyncDisposable
 
         if (data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(RelayRegisterMagic))
         {
-            HandleRelayRegister(sender, data);
+            if (_relayLimiter.IsAllowed(sender))
+                HandleRelayRegister(sender, data);
             return;
         }
 
         if (data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(RelayForwardMagic))
         {
-            await HandleRelayForwardAsync(data).ConfigureAwait(false);
+            if (_relayLimiter.IsAllowed(sender))
+                await HandleRelayForwardAsync(data).ConfigureAwait(false);
             return;
         }
 
         if (data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(RelayDeliverMagic))
         {
-            await HandleRelayDeliverAsync(sender, data).ConfigureAwait(false);
+            if (_relayLimiter.IsAllowed(sender))
+                await HandleRelayDeliverAsync(sender, data).ConfigureAwait(false);
             return;
         }
 
@@ -387,7 +393,39 @@ public sealed class UdpEndpoint : IAsyncDisposable
         if (data.Length != 4 + NodeIdSize)
             return;
         var nodeIdHex = Convert.ToHexString(data.AsSpan(4, NodeIdSize));
-        _registrations[nodeIdHex] = (sender, DateTimeOffset.UtcNow.Add(RegistrationTtl));
+        var now = DateTimeOffset.UtcNow;
+
+        if (_registrations.TryGetValue(nodeIdHex, out var existing)
+            && existing.Expiry > now
+            && !existing.Endpoint.Equals(sender))
+            return;
+
+        if (!_registrations.ContainsKey(nodeIdHex) && _registrations.Count >= MaxRegistrations
+            && !EvictOldestRegistration(now))
+            return;
+
+        _registrations[nodeIdHex] = (sender, now.Add(RegistrationTtl));
+    }
+
+    private bool EvictOldestRegistration(DateTimeOffset now)
+    {
+        var oldest = default(string);
+        var oldestExpiry = DateTimeOffset.MaxValue;
+        foreach (var kvp in _registrations)
+        {
+            if (kvp.Value.Expiry <= now)
+            {
+                _registrations.TryRemove(kvp.Key, out _);
+                return true;
+            }
+            if (kvp.Value.Expiry < oldestExpiry)
+            {
+                oldestExpiry = kvp.Value.Expiry;
+                oldest = kvp.Key;
+            }
+        }
+
+        return oldest != null && _registrations.TryRemove(oldest, out _);
     }
 
     private async Task HandleRelayForwardAsync(byte[] data)
@@ -464,7 +502,7 @@ public sealed class UdpEndpoint : IAsyncDisposable
         if (total * (long)MaxFragmentPayload > SecurityLimits.MaxMessageSize + total)
             return;
 
-        var key = $"{sender}:{messageId}";
+        var key = new ReassemblyKey(sender, messageId);
 
         if (_completed.ContainsKey(key))
         {
@@ -472,7 +510,15 @@ public sealed class UdpEndpoint : IAsyncDisposable
             return;
         }
 
-        var inbound = _inbound.GetOrAdd(key, _ => new Inbound(total, DateTimeOffset.UtcNow));
+        if (!_inbound.TryGetValue(key, out var inbound))
+        {
+            if (CountInboundForSender(sender) >= MaxReassembliesPerSender)
+                return;
+            var created = new Inbound(total, DateTimeOffset.UtcNow);
+            inbound = _inbound.GetOrAdd(key, created);
+            if (ReferenceEquals(inbound, created))
+                _inboundPerSender.AddOrUpdate(sender, 1, static (_, c) => c + 1);
+        }
         if (inbound.Total != total)
             return;
 
@@ -491,6 +537,7 @@ public sealed class UdpEndpoint : IAsyncDisposable
         if (!_inbound.TryRemove(key, out _))
             return;
 
+        DecrementSender(sender);
         _completed[key] = DateTimeOffset.UtcNow;
         await SendDatagramAsync(sender, BuildAckFrame(messageId)).ConfigureAwait(false);
 
@@ -508,6 +555,12 @@ public sealed class UdpEndpoint : IAsyncDisposable
             });
         }
     }
+
+    private int CountInboundForSender(IPEndPoint sender)
+        => _inboundPerSender.TryGetValue(sender, out var count) ? count : 0;
+
+    private void DecrementSender(IPEndPoint sender)
+        => _inboundPerSender.AddOrUpdate(sender, 0, static (_, c) => c > 0 ? c - 1 : 0);
 
     private void HandleStunResponse(byte[] data)
     {
@@ -576,28 +629,42 @@ public sealed class UdpEndpoint : IAsyncDisposable
                 if (now - kvp.Value > CompletedRetention)
                     _completed.TryRemove(kvp.Key, out _);
             foreach (var kvp in _inbound)
-                if (now - kvp.Value.StartedAt > ReassemblyTimeout)
-                    _inbound.TryRemove(kvp.Key, out _);
+                if (now - kvp.Value.StartedAt > ReassemblyTimeout && _inbound.TryRemove(kvp.Key, out _))
+                    DecrementSender(kvp.Key.Sender);
+            foreach (var kvp in _inboundPerSender)
+                if (kvp.Value == 0)
+                    ((ICollection<KeyValuePair<IPEndPoint, int>>)_inboundPerSender).Remove(kvp);
             foreach (var kvp in _registrations)
                 if (kvp.Value.Expiry < now)
                     _registrations.TryRemove(kvp.Key, out _);
         }
     }
 
-    private static List<byte[]> Fragment(byte[] payload)
+    private static byte[][] BuildDataFrames(Guid messageId, byte[] payload)
     {
-        var fragments = new List<byte[]>();
-        if (payload.Length == 0)
+        int count = payload.Length == 0
+            ? 1
+            : (payload.Length + MaxFragmentPayload - 1) / MaxFragmentPayload;
+
+        var frames = new byte[count][];
+        for (int i = 0; i < count; i++)
         {
-            fragments.Add(Array.Empty<byte>());
-            return fragments;
+            int offset = i * MaxFragmentPayload;
+            int len = Math.Min(MaxFragmentPayload, payload.Length - offset);
+            if (len < 0) len = 0;
+
+            var frame = new byte[27 + len];
+            ReliableMagic.CopyTo(frame, 0);
+            frame[4] = FrameData;
+            messageId.TryWriteBytes(frame.AsSpan(5, 16));
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(21, 2), (ushort)count);
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(23, 2), (ushort)i);
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(25, 2), (ushort)len);
+            if (len > 0)
+                payload.AsSpan(offset, len).CopyTo(frame.AsSpan(27));
+            frames[i] = frame;
         }
-        for (int offset = 0; offset < payload.Length; offset += MaxFragmentPayload)
-        {
-            var len = Math.Min(MaxFragmentPayload, payload.Length - offset);
-            fragments.Add(payload.AsSpan(offset, len).ToArray());
-        }
-        return fragments;
+        return frames;
     }
 
     private static byte[] Reassemble(Inbound inbound)
@@ -613,25 +680,12 @@ public sealed class UdpEndpoint : IAsyncDisposable
         return result;
     }
 
-    private static byte[] BuildDataFrame(Guid messageId, ushort total, ushort index, byte[] fragment)
-    {
-        var frame = new byte[27 + fragment.Length];
-        ReliableMagic.CopyTo(frame, 0);
-        frame[4] = FrameData;
-        messageId.ToByteArray().CopyTo(frame, 5);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(21, 2), total);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(23, 2), index);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(25, 2), (ushort)fragment.Length);
-        fragment.CopyTo(frame, 27);
-        return frame;
-    }
-
     private static byte[] BuildAckFrame(Guid messageId)
     {
         var frame = new byte[21];
         ReliableMagic.CopyTo(frame, 0);
         frame[4] = FrameAck;
-        messageId.ToByteArray().CopyTo(frame, 5);
+        messageId.TryWriteBytes(frame.AsSpan(5, 16));
         return frame;
     }
 
@@ -660,6 +714,8 @@ public sealed class UdpEndpoint : IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
         _client?.Dispose();
     }
+
+    private readonly record struct ReassemblyKey(IPEndPoint Sender, Guid MessageId);
 
     private sealed class Inbound
     {

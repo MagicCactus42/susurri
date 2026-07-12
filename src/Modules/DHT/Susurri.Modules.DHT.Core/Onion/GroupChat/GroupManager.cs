@@ -146,6 +146,7 @@ public sealed class GroupManager : IDisposable
             return;
 
         if (memberPublicKey.Length != 32 ||
+            info.Members.Count >= SecurityLimits.MaxGroupMembers ||
             info.Members.Any(m => m.PublicKey.SequenceEqual(memberPublicKey)))
             return;
 
@@ -189,6 +190,9 @@ public sealed class GroupManager : IDisposable
 
         if (info.Members.Any(m => m.PublicKey.SequenceEqual(memberPublicKey)))
             return;
+
+        if (info.Members.Count >= SecurityLimits.MaxGroupMembers)
+            throw new InvalidOperationException("Group is full");
 
         info.Members.Add(new GroupMember
         {
@@ -242,6 +246,7 @@ public sealed class GroupManager : IDisposable
                 }
                 catch
                 {
+                    LocalEncryption.QuarantineCorrupt(file);
                 }
             }
         }
@@ -264,22 +269,19 @@ public sealed class GroupManager : IDisposable
             }
             catch
             {
+                LocalEncryption.QuarantineCorrupt(file);
             }
         }
     }
 
     private void SaveGroup(GroupInfo info)
     {
+        if (_storageKey == null)
+            return;
+
         var data = info.Serialize();
-        if (_storageKey != null)
-        {
-            File.WriteAllBytes(GetEncryptedGroupFilePath(info.GroupId), LocalEncryption.Encrypt(_storageKey, data));
-            LocalEncryption.SecureDelete(GetGroupFilePath(info.GroupId));
-        }
-        else
-        {
-            File.WriteAllBytes(GetGroupFilePath(info.GroupId), data);
-        }
+        File.WriteAllBytes(GetEncryptedGroupFilePath(info.GroupId), LocalEncryption.Encrypt(_storageKey, data));
+        LocalEncryption.SecureDelete(GetGroupFilePath(info.GroupId));
     }
 
     private string GetGroupFilePath(Guid groupId)

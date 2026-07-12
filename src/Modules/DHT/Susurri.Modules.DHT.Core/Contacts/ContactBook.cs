@@ -18,6 +18,8 @@ public sealed class ContactBook
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Contact> _byPetname = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Contact> _byUsername = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Contact> _byEncKeyHex = new(StringComparer.Ordinal);
     private readonly byte[] _storageKey;
     private readonly string _filePath;
 
@@ -55,8 +57,7 @@ public sealed class ContactBook
     {
         lock (_gate)
         {
-            return _byPetname.Values.FirstOrDefault(
-                c => string.Equals(c.Username, username, StringComparison.OrdinalIgnoreCase));
+            return _byUsername.GetValueOrDefault(username);
         }
     }
 
@@ -67,8 +68,7 @@ public sealed class ContactBook
     {
         lock (_gate)
         {
-            return _byPetname.Values.FirstOrDefault(
-                c => c.EncryptionPublicKey.AsSpan().SequenceEqual(encryptionPublicKey));
+            return _byEncKeyHex.GetValueOrDefault(Convert.ToHexString(encryptionPublicKey));
         }
     }
 
@@ -76,8 +76,11 @@ public sealed class ContactBook
     {
         lock (_gate)
         {
+            if (_byPetname.Count >= SecurityLimits.MaxContacts)
+                return false;
             if (!_byPetname.TryAdd(contact.Petname, contact))
                 return false;
+            IndexLocked(contact);
             SaveLocked();
             return true;
         }
@@ -87,8 +90,9 @@ public sealed class ContactBook
     {
         lock (_gate)
         {
-            if (!_byPetname.Remove(petname))
+            if (!_byPetname.Remove(petname, out var removed))
                 return false;
+            UnindexLocked(removed);
             SaveLocked();
             return true;
         }
@@ -102,7 +106,9 @@ public sealed class ContactBook
                 return false;
 
             _byPetname.Remove(petname);
-            _byPetname[newPetname] = new Contact
+            UnindexLocked(existing);
+
+            var renamed = new Contact
             {
                 Petname = newPetname,
                 Username = existing.Username,
@@ -111,9 +117,27 @@ public sealed class ContactBook
                 Verified = existing.Verified,
                 AddedAt = existing.AddedAt
             };
+            _byPetname[newPetname] = renamed;
+            IndexLocked(renamed);
             SaveLocked();
             return true;
         }
+    }
+
+    private void IndexLocked(Contact contact)
+    {
+        _byUsername[contact.Username] = contact;
+        _byEncKeyHex[Convert.ToHexString(contact.EncryptionPublicKey)] = contact;
+    }
+
+    private void UnindexLocked(Contact contact)
+    {
+        if (_byUsername.TryGetValue(contact.Username, out var byName) && ReferenceEquals(byName, contact))
+            _byUsername.Remove(contact.Username);
+
+        var hex = Convert.ToHexString(contact.EncryptionPublicKey);
+        if (_byEncKeyHex.TryGetValue(hex, out var byKey) && ReferenceEquals(byKey, contact))
+            _byEncKeyHex.Remove(hex);
     }
 
     public bool SetVerified(string petname, bool verified)
@@ -155,11 +179,15 @@ public sealed class ContactBook
                     AddedAt = reader.ReadInt64()
                 };
                 _byPetname[contact.Petname] = contact;
+                IndexLocked(contact);
             }
         }
         catch
         {
             _byPetname.Clear();
+            _byUsername.Clear();
+            _byEncKeyHex.Clear();
+            LocalEncryption.QuarantineCorrupt(_filePath);
         }
     }
 

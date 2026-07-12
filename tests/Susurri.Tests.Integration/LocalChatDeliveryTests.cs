@@ -39,7 +39,7 @@ public class LocalChatDeliveryTests
             new ChatNodeOptions(AllowLoopback: true));
     }
 
-    private static async Task<T?> PollAsync<T>(Func<T?> probe, int attempts = 80, int delayMs = 150)
+    private static async Task<T?> PollAsync<T>(Func<T?> probe, int attempts = 140, int delayMs = 150)
         where T : class
     {
         for (var i = 0; i < attempts; i++)
@@ -75,7 +75,7 @@ public class LocalChatDeliveryTests
 
             foreach (var n in nodes)
             {
-                var peers = await PollAsync(() => n.PeerCount >= 3 ? "ok" : null);
+                var peers = await PollAsync(() => n.PeerCount >= nodes.Length - 1 ? "ok" : null);
                 peers.ShouldNotBeNull($"node on port {n.LocalPort} never reached 3 peers (had {n.PeerCount})");
             }
 
@@ -123,7 +123,7 @@ public class LocalChatDeliveryTests
             var bob = nodes[4];
 
             foreach (var n in nodes)
-                (await PollAsync(() => n.PeerCount >= 3 ? "ok" : null))
+                (await PollAsync(() => n.PeerCount >= nodes.Length - 1 ? "ok" : null))
                     .ShouldNotBeNull($"node on port {n.LocalPort} never reached 3 peers");
 
             var group = alice.CreateGroup("book-club");
@@ -147,6 +147,71 @@ public class LocalChatDeliveryTests
 
             received.ShouldNotBeNull("bob never received the group message");
             received!.ShouldContain(m => m.Content == "witajcie w grupie");
+        }
+        finally
+        {
+            foreach (var n in nodes)
+                await n.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// File transfer end-to-end over the local onion cluster: alice offers a
+    /// multi-chunk file, bob accepts, chunks flow, and bob reassembles bytes
+    /// that hash-match the original.
+    /// </summary>
+    [Fact]
+    public async Task File_Transfer_Delivers_And_Reassembles_Intact()
+    {
+        var nodes = Enumerable.Range(0, 5).Select(_ => MakeChat()).ToArray();
+        try
+        {
+            await nodes[0].StartAsync(0, "f0");
+            var seed = $"127.0.0.1:{nodes[0].LocalPort}";
+            for (var i = 1; i < nodes.Length; i++)
+                await nodes[i].StartAsync(0, $"f{i}", new[] { seed });
+
+            var alice = nodes[1];
+            var bob = nodes[4];
+
+            foreach (var n in nodes)
+                (await PollAsync(() => n.PeerCount >= nodes.Length - 1 ? "ok" : null))
+                    .ShouldNotBeNull($"node on port {n.LocalPort} never reached 3 peers");
+
+            (await PollAsync(() => alice.GetPublicKeyAsync("f4").GetAwaiter().GetResult()))
+                .ShouldNotBeNull("alice could not resolve bob's key");
+
+            // ~40 KB → 3 chunks (chunk size is 15 800 B).
+            var payload = new byte[40_000];
+            new Random(1234).NextBytes(payload);
+            var expectedHash = System.Security.Cryptography.SHA256.HashData(payload);
+
+            var tmp = Path.Combine(Path.GetTempPath(), $"susurri-xfer-{Guid.NewGuid():N}.bin");
+            await File.WriteAllBytesAsync(tmp, payload);
+
+            var completed = new TaskCompletionSource<CompletedTransfer>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            bob.OnFileTransferRequested += info => bob.AcceptFileTransferAsync(info.TransferId);
+            bob.OnFileTransferCompleted += done => { completed.TrySetResult(done); return Task.CompletedTask; };
+            bob.OnFileTransferFailed += (_, r) => { completed.TrySetException(new Exception($"transfer failed: {r}")); return Task.CompletedTask; };
+
+            try
+            {
+                var send = await alice.SendFileAsync("f4", tmp);
+                _output.WriteLine($"offer success={send.Success} error={send.Error}");
+                send.Success.ShouldBeTrue(send.Error);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                cts.Token.Register(() => completed.TrySetException(new TimeoutException("file never arrived")));
+                var result = await completed.Task;
+
+                result.FileData.Length.ShouldBe(payload.Length);
+                System.Security.Cryptography.SHA256.HashData(result.FileData).ShouldBe(expectedHash);
+            }
+            finally
+            {
+                File.Delete(tmp);
+            }
         }
         finally
         {

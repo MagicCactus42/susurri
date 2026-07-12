@@ -13,6 +13,7 @@ public sealed class RelayService : IAsyncDisposable
     private readonly RoutingTable _routingTable;
     private readonly ConcurrentDictionary<Guid, RelayCircuit> _circuits = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<RelayResponseMessage>> _pendingRelays = new();
+    private readonly RateLimiter _requestLimiter = new(maxTokens: 60, refillRatePerSecond: 20.0);
 
     private CancellationTokenSource? _cleanupCts;
     private Task? _cleanupTask;
@@ -56,6 +57,12 @@ public sealed class RelayService : IAsyncDisposable
 
     public async Task<RelayMessage?> HandleMessageAsync(RelayMessage message, IPEndPoint sender)
     {
+        if (IsRateLimitedRequest(message) && !_requestLimiter.IsAllowed(sender))
+        {
+            _logger.LogWarning("Rate limited relay request from {Sender}", sender);
+            return null;
+        }
+
         return message switch
         {
             CircuitRequestMessage req => await HandleCircuitRequestAsync(req, sender).ConfigureAwait(false),
@@ -66,6 +73,9 @@ public sealed class RelayService : IAsyncDisposable
             _ => null
         };
     }
+
+    private static bool IsRateLimitedRequest(RelayMessage message)
+        => message is CircuitRequestMessage or RelayDataMessage or RelayRequestMessage;
 
     public async Task<byte[]?> RelayToNodeAsync(
         KademliaNode relayNode,

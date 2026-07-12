@@ -18,4 +18,8 @@ public static class SecurityLimits
     public const int MinPassphraseWords = 6;
     public const int MaxPassphraseWords = 24;
     public const int MinCachePasswordLength = 8;
+
+    public const int MaxBucketNodesPerPrefix = 6;
+    public const int MaxContacts = 4096;
+    public const int MaxGroupMembers = 1024;
 }

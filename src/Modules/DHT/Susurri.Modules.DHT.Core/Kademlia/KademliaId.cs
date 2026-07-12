@@ -12,7 +12,9 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
 
     private readonly byte[] _bytes;
 
-    public ReadOnlySpan<byte> Bytes => _bytes ?? new byte[ByteLength];
+    private static readonly byte[] EmptyBytes = new byte[ByteLength];
+
+    public ReadOnlySpan<byte> Bytes => _bytes ?? EmptyBytes;
 
     private KademliaId(byte[] bytes)
     {
@@ -81,8 +83,33 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
 
     public int GetBucketIndex(KademliaId other)
     {
-        var distance = DistanceTo(other);
-        return distance.GetHighestBitIndex();
+        var mine = _bytes ?? EmptyBytes;
+        var theirs = other._bytes ?? EmptyBytes;
+        for (int i = 0; i < ByteLength; i++)
+        {
+            int xor = mine[i] ^ theirs[i];
+            if (xor != 0)
+            {
+                int bitInByte = BitOperations.Log2((uint)xor);
+                return (ByteLength - 1 - i) * 8 + bitInByte;
+            }
+        }
+        return -1;
+    }
+
+    public static int CompareDistances(in KademliaId a, in KademliaId b, in KademliaId target)
+    {
+        var ab = a._bytes ?? EmptyBytes;
+        var bb = b._bytes ?? EmptyBytes;
+        var tb = target._bytes ?? EmptyBytes;
+        for (int i = 0; i < ByteLength; i++)
+        {
+            int da = ab[i] ^ tb[i];
+            int db = bb[i] ^ tb[i];
+            if (da != db)
+                return da < db ? -1 : 1;
+        }
+        return 0;
     }
 
     public bool GetBit(int position)
@@ -97,8 +124,8 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
 
     public int CompareTo(KademliaId other)
     {
-        var myBytes = _bytes ?? new byte[ByteLength];
-        var otherBytes = other._bytes ?? new byte[ByteLength];
+        var myBytes = _bytes ?? EmptyBytes;
+        var otherBytes = other._bytes ?? EmptyBytes;
 
         for (int i = 0; i < ByteLength; i++)
         {
@@ -110,8 +137,8 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
 
     public bool Equals(KademliaId other)
     {
-        var myBytes = _bytes ?? new byte[ByteLength];
-        var otherBytes = other._bytes ?? new byte[ByteLength];
+        var myBytes = _bytes ?? EmptyBytes;
+        var otherBytes = other._bytes ?? EmptyBytes;
         return myBytes.AsSpan().SequenceEqual(otherBytes);
     }
 
@@ -121,7 +148,7 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
     {
         // XOR-fold all 32 bytes into 4 to get better hash distribution
         // This prevents hash collision attacks against Dictionary/HashSet
-        var bytes = _bytes ?? new byte[ByteLength];
+        var bytes = _bytes ?? EmptyBytes;
         int hash = 0;
         for (int i = 0; i < ByteLength; i += 4)
         {
@@ -132,7 +159,7 @@ public readonly struct KademliaId : IEquatable<KademliaId>, IComparable<Kademlia
 
     public override string ToString()
     {
-        var bytes = _bytes ?? new byte[ByteLength];
+        var bytes = _bytes ?? EmptyBytes;
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSec.Cryptography;
 using Susurri.Modules.DHT.Core.Contacts;
 using Susurri.Modules.DHT.Core.Kademlia;
@@ -22,6 +23,7 @@ public sealed class ChatService : IAsyncDisposable
     private readonly Key? _signingKey;
 
     private readonly ConcurrentDictionary<string, UserPublicKeyRecord> _keyCache = new();
+    private readonly ConcurrentDictionary<string, string> _keyCacheByEncKey = new();
 
     private readonly ConcurrentDictionary<Guid, PendingMessage> _pendingMessages = new();
 
@@ -30,6 +32,7 @@ public sealed class ChatService : IAsyncDisposable
     private readonly GroupManager _groupManager;
     private readonly RatchetSessionManager _ratchet;
     private readonly GroupRatchetManager _groupRatchet;
+    private readonly FileTransferService _fileTransfer;
     private readonly byte[]? _localStoreKey;
     private readonly ConcurrentDictionary<Guid, ReceivedGroupMessage> _receivedGroupMessages = new();
     private readonly Dictionary<string, List<EncryptedGroupMessageV2>> _pendingGroupV2 = new();
@@ -45,6 +48,10 @@ public sealed class ChatService : IAsyncDisposable
     public event Func<ReceivedMessage, Task>? OnMessageReceived;
     public event Func<Guid, Task>? OnMessageAcknowledged;
     public event Func<ReceivedGroupMessage, Task>? OnGroupMessageReceived;
+    public event Func<FileTransferInfo, Task>? OnFileTransferRequested;
+    public event Func<TransferProgress, Task>? OnFileTransferProgress;
+    public event Func<CompletedTransfer, Task>? OnFileTransferCompleted;
+    public event Func<Guid, string, Task>? OnFileTransferFailed;
 
     public byte[] LocalPublicKey => _dhtNode.EncryptionPublicKey;
     public byte[] LocalSigningPublicKey => _dhtNode.SigningPublicKey;
@@ -63,7 +70,8 @@ public sealed class ChatService : IAsyncDisposable
         ILogger<ConnectionManager> connectionLogger,
         Key? signingKey = null,
         ChatNodeOptions? nodeOptions = null,
-        byte[]? localStoreKey = null)
+        byte[]? localStoreKey = null,
+        ILogger<FileTransferService>? fileTransferLogger = null)
     {
         var options = nodeOptions ?? new ChatNodeOptions();
         _encryptionKey = encryptionKey;
@@ -90,12 +98,51 @@ public sealed class ChatService : IAsyncDisposable
             ? new ContactBook(_localStoreKey, _dhtNode.EncryptionPublicKey)
             : null;
 
+        _fileTransfer = new FileTransferService(
+            _dhtNode, _router,
+            fileTransferLogger ?? NullLogger<FileTransferService>.Instance,
+            signingKey);
+        _fileTransfer.OnTransferRequested += info => OnFileTransferRequested?.Invoke(info) ?? Task.CompletedTask;
+        _fileTransfer.OnTransferProgress += p => OnFileTransferProgress?.Invoke(p) ?? Task.CompletedTask;
+        _fileTransfer.OnTransferCompleted += t => OnFileTransferCompleted?.Invoke(t) ?? Task.CompletedTask;
+        _fileTransfer.OnTransferFailed += (id, reason) => OnFileTransferFailed?.Invoke(id, reason) ?? Task.CompletedTask;
+
         _router.OnMessageReceived += HandleIncomingMessageAsync;
         _router.OnAckReceived += HandleAckAsync;
         _router.OnGroupMessageReceived += HandleGroupMessageAsync;
         _router.OnGroupMessageV2Received += HandleGroupMessageV2Async;
         _router.OnGroupRekeyReceived += HandleGroupRekeyAsync;
     }
+
+    public async Task<SendResult> SendFileAsync(string recipientUsername, string filePath)
+    {
+        var recipientKey = await GetPublicKeyAsync(recipientUsername).ConfigureAwait(false);
+        if (recipientKey == null)
+            return new SendResult(false, null, "User not found");
+
+        byte[] fileData;
+        try
+        {
+            fileData = await File.ReadAllBytesAsync(filePath).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return new SendResult(false, null, $"Could not read file: {ex.Message}");
+        }
+
+        var fileName = Path.GetFileName(filePath);
+        return await _fileTransfer.SendFileAsync(fileName, fileData, recipientKey.EncryptionPublicKey)
+            .ConfigureAwait(false);
+    }
+
+    public Task AcceptFileTransferAsync(Guid transferId) => _fileTransfer.AcceptTransferAsync(transferId);
+
+    public Task RejectFileTransferAsync(Guid transferId, string reason = "Rejected by user")
+        => _fileTransfer.RejectTransferAsync(transferId, reason);
+
+    public IReadOnlyList<FileTransferInfo> GetActiveFileTransfers() => _fileTransfer.GetActiveTransfers();
+
+    public string? ResolveUsername(byte[] senderPublicKey) => ResolveSenderName(senderPublicKey);
 
     public GroupInfo CreateGroup(string name) => _groupManager.CreateGroup(name);
 
@@ -450,12 +497,7 @@ public sealed class ChatService : IAsyncDisposable
             return petname;
 
         var senderKeyHex = Convert.ToHexString(senderPublicKey);
-        foreach (var kvp in _keyCache)
-        {
-            if (Convert.ToHexString(kvp.Value.EncryptionPublicKey) == senderKeyHex)
-                return kvp.Key;
-        }
-        return null;
+        return _keyCacheByEncKey.GetValueOrDefault(senderKeyHex);
     }
 
     private RoutingTable GetRoutingTable()
@@ -580,6 +622,7 @@ public sealed class ChatService : IAsyncDisposable
         if (record != null)
         {
             _keyCache[username] = record;
+            _keyCacheByEncKey[Convert.ToHexString(record.EncryptionPublicKey)] = username;
             _logger.LogDebug("Cached public key for {Username}", username);
         }
 
@@ -854,6 +897,7 @@ public sealed class ChatService : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _fileTransfer.Dispose();
         _groupManager.Dispose();
         _ratchet.Dispose();
         _groupRatchet.Dispose();

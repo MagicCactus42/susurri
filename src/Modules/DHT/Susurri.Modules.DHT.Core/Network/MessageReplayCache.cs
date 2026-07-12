@@ -11,7 +11,8 @@ public sealed class MessageReplayCache
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> _seen = new();
     private readonly TimeSpan _ttl;
     private readonly int _capacity;
-    private DateTimeOffset _lastSweep = DateTimeOffset.UtcNow;
+    private long _lastSweepTicks = DateTimeOffset.UtcNow.UtcTicks;
+    private int _count;
     private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
 
     public MessageReplayCache(TimeSpan? ttl = null, int capacity = 100_000)
@@ -26,20 +27,27 @@ public sealed class MessageReplayCache
     /// </summary>
     public bool TryRecord(Guid messageId)
     {
-        Sweep();
+        MaybeSweep();
 
         var now = DateTimeOffset.UtcNow;
 
-        if (_seen.TryGetValue(messageId, out var seenAt) && now - seenAt < _ttl)
+        if (_seen.TryGetValue(messageId, out var seenAt))
         {
-            return false;
+            if (now - seenAt < _ttl)
+                return false;
+
+            _seen[messageId] = now;
+            return true;
         }
 
-        _seen[messageId] = now;
-
-        if (_seen.Count > _capacity)
+        if (_seen.TryAdd(messageId, now))
         {
-            EvictOldest();
+            if (Interlocked.Increment(ref _count) > _capacity)
+                EvictOldest();
+        }
+        else
+        {
+            _seen[messageId] = now;
         }
 
         return true;
@@ -58,34 +66,46 @@ public sealed class MessageReplayCache
 
     public int Count => _seen.Count;
 
-    private void Sweep()
+    private void MaybeSweep()
     {
-        if (DateTimeOffset.UtcNow - _lastSweep < SweepInterval)
+        var now = DateTimeOffset.UtcNow;
+        var last = Interlocked.Read(ref _lastSweepTicks);
+        if (now.UtcTicks - last < SweepInterval.Ticks)
+            return;
+        if (Interlocked.CompareExchange(ref _lastSweepTicks, now.UtcTicks, last) != last)
             return;
 
-        _lastSweep = DateTimeOffset.UtcNow;
-        var cutoff = DateTimeOffset.UtcNow - _ttl;
+        PruneExpired(now);
+    }
 
+    private void PruneExpired(DateTimeOffset now)
+    {
+        var cutoff = now - _ttl;
         foreach (var kvp in _seen)
         {
-            if (kvp.Value < cutoff)
-            {
-                _seen.TryRemove(kvp.Key, out _);
-            }
+            if (kvp.Value < cutoff && _seen.TryRemove(kvp.Key, out _))
+                Interlocked.Decrement(ref _count);
         }
     }
 
     private void EvictOldest()
     {
-        var toEvict = _seen
+        PruneExpired(DateTimeOffset.UtcNow);
+
+        var surplus = Volatile.Read(ref _count) - _capacity + (_capacity / 10);
+        if (surplus <= 0)
+            return;
+
+        var oldest = _seen
             .OrderBy(kvp => kvp.Value)
-            .Take(_seen.Count - _capacity + (_capacity / 10))
+            .Take(surplus)
             .Select(kvp => kvp.Key)
             .ToList();
 
-        foreach (var key in toEvict)
+        foreach (var key in oldest)
         {
-            _seen.TryRemove(key, out _);
+            if (_seen.TryRemove(key, out _))
+                Interlocked.Decrement(ref _count);
         }
     }
 }

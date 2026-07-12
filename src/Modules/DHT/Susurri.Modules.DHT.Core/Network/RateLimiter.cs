@@ -8,6 +8,7 @@ public sealed class RateLimiter
     private readonly int _maxTokens;
     private readonly double _refillRate;
     private readonly ConcurrentDictionary<string, TokenBucket> _buckets = new();
+    private readonly ConcurrentDictionary<IPAddress, TokenBucket> _ipBuckets = new();
     private DateTimeOffset _lastCleanup = DateTimeOffset.UtcNow;
     private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(5);
 
@@ -19,10 +20,9 @@ public sealed class RateLimiter
 
     public bool IsAllowed(IPEndPoint endpoint)
     {
-        var key = endpoint.Address.ToString();
         TryCleanup();
 
-        var bucket = _buckets.GetOrAdd(key, _ => new TokenBucket(_maxTokens, _refillRate));
+        var bucket = _ipBuckets.GetOrAdd(endpoint.Address, _ => new TokenBucket(_maxTokens, _refillRate));
         return bucket.TryConsume();
     }
 
@@ -40,14 +40,16 @@ public sealed class RateLimiter
 
         _lastCleanup = DateTimeOffset.UtcNow;
 
-        var staleKeys = _buckets
-            .Where(kvp => kvp.Value.IsStale(CleanupInterval))
-            .Select(kvp => kvp.Key)
-            .ToList();
-
-        foreach (var key in staleKeys)
+        foreach (var kvp in _buckets)
         {
-            _buckets.TryRemove(key, out _);
+            if (kvp.Value.IsStale(CleanupInterval))
+                _buckets.TryRemove(kvp.Key, out _);
+        }
+
+        foreach (var kvp in _ipBuckets)
+        {
+            if (kvp.Value.IsStale(CleanupInterval))
+                _ipBuckets.TryRemove(kvp.Key, out _);
         }
     }
 

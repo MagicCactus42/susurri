@@ -51,7 +51,7 @@ jobs:
 
       - name: test (windows and macos)
         if: runner.os != 'Linux'
-        run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --filter "FullyQualifiedName!~RoutingTableTests.FindClosestNodes_ReturnsNodesOrderedByDistance"
+        run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
 
       - name: upload test results
         if: always()

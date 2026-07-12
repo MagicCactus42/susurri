@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using Susurri.Shared.Abstractions.Security;
+
 namespace Susurri.Modules.DHT.Core.Kademlia;
 
 // The Kademlia routing table containing 256 k-buckets.
@@ -25,6 +28,9 @@ public sealed class RoutingTable
 
     public AddNodeResult TryAddNode(KademliaNode node)
     {
+        if (!IsIdBoundToKey(node))
+            return AddNodeResult.Rejected;
+
         if (node.Id == LocalId)
             return AddNodeResult.Updated;
 
@@ -33,6 +39,12 @@ public sealed class RoutingTable
             return AddNodeResult.Updated;
 
         return _buckets[bucketIndex].TryAdd(node);
+    }
+
+    private static bool IsIdBoundToKey(KademliaNode node)
+    {
+        return node.EncryptionPublicKey.Length == SecurityLimits.PublicKeySize
+               && node.Id == KademliaId.FromPublicKey(node.EncryptionPublicKey);
     }
 
     public bool RemoveNode(KademliaId nodeId)
@@ -48,17 +60,16 @@ public sealed class RoutingTable
         if (count <= 0) count = _k;
 
         var allNodes = new List<KademliaNode>();
-
         foreach (var bucket in _buckets)
         {
-            allNodes.AddRange(bucket.GetNodes());
+            bucket.CopyNodesTo(allNodes);
         }
 
-        // Sort by XOR distance to target
-        return allNodes
-            .OrderBy(n => n.Id.DistanceTo(target))
-            .Take(count)
-            .ToList();
+        allNodes.Sort((a, b) => KademliaId.CompareDistances(a.Id, b.Id, target));
+
+        if (allNodes.Count > count)
+            allNodes.RemoveRange(count, allNodes.Count - count);
+        return allNodes;
     }
 
     public IReadOnlyList<KademliaNode> GetBucketNodes(int bucketIndex)
@@ -98,7 +109,12 @@ public sealed class RoutingTable
 
     public IReadOnlyList<KademliaNode> GetAllNodes()
     {
-        return _buckets.SelectMany(b => b.GetNodes()).ToList();
+        var allNodes = new List<KademliaNode>();
+        foreach (var bucket in _buckets)
+        {
+            bucket.CopyNodesTo(allNodes);
+        }
+        return allNodes;
     }
 
     public bool ContainsNode(KademliaId nodeId)
@@ -112,24 +128,29 @@ public sealed class RoutingTable
         var nonEmptyBuckets = _buckets.Where(b => b.Count > 0).ToList();
         if (nonEmptyBuckets.Count == 0) return null;
 
-        var bucket = nonEmptyBuckets[Random.Shared.Next(nonEmptyBuckets.Count)];
+        var bucket = nonEmptyBuckets[RandomNumberGenerator.GetInt32(nonEmptyBuckets.Count)];
         var nodes = bucket.GetNodes();
-        return nodes.Count > 0 ? nodes[Random.Shared.Next(nodes.Count)] : null;
+        return nodes.Count > 0 ? nodes[RandomNumberGenerator.GetInt32(nodes.Count)] : null;
     }
 
     public IReadOnlyList<KademliaNode> GetRandomNodes(int count)
     {
-        var allNodes = GetAllNodes().ToList();
-        if (allNodes.Count <= count) return allNodes;
-
-        // Fisher-Yates shuffle, take first 'count'
-        for (int i = allNodes.Count - 1; i > 0; i--)
+        var pool = new List<KademliaNode>();
+        foreach (var bucket in _buckets)
         {
-            int j = Random.Shared.Next(i + 1);
-            (allNodes[i], allNodes[j]) = (allNodes[j], allNodes[i]);
+            bucket.CopyNodesTo(pool);
+        }
+        if (pool.Count <= count) return pool;
+
+        // Partial Fisher-Yates: place `count` uniformly-random picks at the front.
+        for (int i = 0; i < count; i++)
+        {
+            int j = i + RandomNumberGenerator.GetInt32(pool.Count - i);
+            (pool[i], pool[j]) = (pool[j], pool[i]);
         }
 
-        return allNodes.Take(count).ToList();
+        pool.RemoveRange(count, pool.Count - count);
+        return pool;
     }
 
     private int GetBucketIndex(KademliaId nodeId)

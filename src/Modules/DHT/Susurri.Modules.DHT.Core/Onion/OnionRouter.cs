@@ -311,7 +311,7 @@ public sealed class OnionRouter
 
         _logger.LogDebug("Relaying onion to {NextHop}", nextEndpoint);
 
-        var delayMs = Random.Shared.Next(50, 501);
+        var delayMs = System.Security.Cryptography.RandomNumberGenerator.GetInt32(50, 501);
         await Task.Delay(delayMs).ConfigureAwait(false);
 
         SusurriMetrics.OnionRelayed.Add(1);
@@ -648,7 +648,7 @@ public sealed class OnionRouter
 
         var prevEndpoint = new IPEndPoint(prevAddress, tokenContent.PreviousHopPort);
 
-        var delayMs = Random.Shared.Next(50, 501);
+        var delayMs = System.Security.Cryptography.RandomNumberGenerator.GetInt32(50, 501);
         await Task.Delay(delayMs).ConfigureAwait(false);
 
         await SendToNodeAsync(prevEndpoint, content.InnerPayload, OnionWireKind.ReplyChain).ConfigureAwait(false);

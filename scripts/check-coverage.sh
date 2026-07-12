@@ -65,7 +65,6 @@ run_project() {
     timeout 600 dotnet test "tests/$proj/$proj.csproj" \
         --configuration "${CONFIGURATION:-Debug}" \
         --no-build --nologo --logger "console;verbosity=quiet" \
-        --filter "FullyQualifiedName!~RoutingTableTests.FindClosestNodes_ReturnsNodesOrderedByDistance" \
         --collect:"XPlat Code Coverage" \
         --settings coverage.runsettings \
         --results-directory "$subdir" >/dev/null 2>&1 || true
