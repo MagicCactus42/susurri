@@ -85,26 +85,50 @@ dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj \
 
 ---
 
-## Optional — the `login` / user-registration flow (needs Postgres)
+## Using it as a messenger
 
-Running a node does not require this. It's only needed if you want to register a
-username in the local Users database.
+Once at least one seed is reachable (set `DHT:BootstrapNodes` or
+`DHT__BootstrapNodes__0=ip:port`), log in and chat:
 
 ```bash
-cp .env.example .env          # set POSTGRES_USER / POSTGRES_PASSWORD
-docker compose up -d db       # starts Postgres on :5432
-
-# tell the CLI where the DB is (must match .env):
-export ConnectionStrings__UsersDb="Host=localhost;Port=5432;Database=susurri;Username=susurri;Password=<yours>"
-
-./dist/susurri-cli
-# > generate            (creates a BIP39 passphrase — your identity)
-# > login <username>    (enter the passphrase)
+DHT__BootstrapNodes__0=1.2.3.4:7070 ./dist/susurri-cli
+# > generate                       (create a BIP39 passphrase — your identity)
+# > login alice                    (enter the passphrase; derives your keys, goes online)
+# > send bob hey there             (looks bob up in the DHT, sends over onion routing)
+# > inbox                          (list received messages; incoming ones also print live)
+# > status                         (identity, port, peers, inbox count)
+# > logout
 ```
 
-Your identity is derived from the passphrase (PBKDF2-SHA256, 600k iterations →
-Ed25519 signing + X25519 encryption keys). Keep the passphrase safe: it *is*
-your account. There is no password reset in a decentralized system.
+Your username → public-key mapping is published to the DHT on login, so peers
+find you by name. Direct messages are onion-routed (3 hops by default) and
+delivered to the recipient, or stored in the DHT if they're offline.
+
+### Group chat
+
+```bash
+# > group create book-club                       (prints a group id)
+# > group invite <group-id> bob                   (resolves bob's key, prints an invite code)
+#   (send the invite code to bob out of band)
+# bob> group join <invite-code>                   (joins with his private key)
+# > group send <group-id> hi everyone             (encrypts once, fans out over onion)
+# > group list / group msgs <group-id>
+```
+
+Group messages are encrypted with a shared group key (wrapped per member on
+invite) and delivered to each member over onion routing.
+
+## Identity
+
+Your identity is derived entirely from your passphrase and username
+(PBKDF2-SHA256, 600k iterations, a stable per-username salt → Ed25519 signing +
+X25519 encryption keys). The same passphrase + username reproduce the same
+identity on any machine — nothing is stored server-side, and **no database is
+required**. Keep the passphrase safe: it *is* your account, and there is no
+password reset in a decentralized system.
+
+> Postgres (`docker compose up -d db`, `.env`) is only used by the legacy
+> username-registration handler and is **not needed** for the messenger.
 
 ---
 

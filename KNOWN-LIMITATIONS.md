@@ -87,27 +87,6 @@ already done.
 
 ---
 
-## Phase 2.6 deferrals
-
-### Group-chat CLI wiring
-- **What:** the `GroupManager` library at
-  `src/Modules/DHT/Susurri.Modules.DHT.Core/Onion/GroupChat/GroupManager.cs`
-  is implemented and security-reviewed (HKDF domain separation, key wrapping
-  per member, replay/timestamp protection inherited from chat-message paths).
-  But the CLI's `group create / list / invite / join / leave` subcommands
-  are not yet wired up.
-- **Current behavior:** invoking any subcommand throws
-  `NotImplementedException` with a pointer to this file. `group help` still
-  prints the planned command surface so users know what's coming.
-- **Why deferred:** wiring the CLI requires a per-user persisted group state,
-  invite-code parsing/serialization, and a CLI flow for accepting incoming
-  invites — out of scope for the production-readiness roadmap and best
-  delivered as its own feature work.
-- **Target:** **post-Phase-8** feature work, owned by the group-chat
-  feature track.
-
----
-
 ## Phases not yet started
 
 These are entire phases of the production-readiness roadmap that have not been
