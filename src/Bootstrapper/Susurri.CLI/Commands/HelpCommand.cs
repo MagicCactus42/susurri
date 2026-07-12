@@ -18,7 +18,7 @@ internal sealed class HelpCommand : ICommand
 
     private static readonly (string Title, string[] Names)[] Groups =
     {
-        ("messaging", new[] { "login", "logout", "send", "inbox", "chats", "group", "contacts", "history" }),
+        ("messaging", new[] { "login", "logout", "send", "inbox", "chats", "group", "contacts", "history", "file" }),
         ("network", new[] { "dht", "ping", "status" }),
         ("identity", new[] { "generate", "clearcache" }),
         ("app", new[] { "help", "version", "clear", "exit" })

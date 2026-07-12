@@ -172,7 +172,7 @@ internal sealed class ConversationStore : IDisposable
             NotifyChanged();
     }
 
-    public async Task SendDirectAsync(string username, string content)
+    public async Task<SendResult> SendDirectAsync(string username, string content)
     {
         var entry = new ChatEntry
         {
@@ -209,6 +209,7 @@ internal sealed class ConversationStore : IDisposable
                 _outgoingById[id] = entry;
         }
         NotifyChanged();
+        return result;
     }
 
     public async Task SendGroupAsync(Guid groupId, string content)

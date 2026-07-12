@@ -55,6 +55,7 @@ internal sealed class HistoryStore
             }
             catch
             {
+                LocalEncryption.QuarantineCorrupt(_filePath);
                 return new List<Conversation>();
             }
         }
