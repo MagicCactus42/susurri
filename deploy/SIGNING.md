@@ -117,7 +117,7 @@ To enforce it on the repo (optional), enable branch protection → "Require sign
 
 ## 4. Android APK signing
 
-Every push to `main` builds an APK (`.github/workflows/android.yml`). Android requires every APK to be signed; without your keystore the workflow falls back to a **throwaway debug signature** and logs a warning — installable, but every CI run signs with a different identity, so updates won't install over an old build and users can't pin a signer.
+Every push to `main` builds an APK (`.github/workflows/android.yml`), and every tagged release attaches `susurri-android.apk` covered by the GPG-signed `SHA256SUMS` (`release.yml`, android job). Android requires every APK to be signed; without your keystore both workflows fall back to a **throwaway debug signature** and log a warning — installable, but every run signs with a different identity, so updates won't install over an old build and users can't pin a signer.
 
 Generate a dedicated release keystore once:
 

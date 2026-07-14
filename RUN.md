@@ -23,6 +23,7 @@ Every tagged release ships GUI **and** CLI for all three desktop platforms
 | Windows | `susurri-setup-x64.exe` (installer, auto-updates, bundles the CLI) | `Susurri.CLI.exe` inside the install dir |
 | Linux | `susurri-linux-x64.AppImage` (`chmod +x`, run; needs libfuse2 on some distros) | `susurri-cli-linux-x64.tar.gz` |
 | macOS | `susurri-macos-arm64.pkg` / `susurri-macos-x64.pkg` (also inside: `Susurri.app/Contents/MacOS/susurri-cli`) | `susurri-cli-macos-{arch}.tar.gz` |
+| Android | `susurri-android.apk` (arm64 + x64, sideload) | — |
 
 The binaries bundle the .NET 10 runtime and libsodium, so nothing else needs to
 be installed. Alternatively build the same layout locally:
@@ -115,8 +116,9 @@ dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj \
 
 ### Android
 
-CI builds a signed APK on every push to `main` — grab the `susurri-android-apk`
-artifact from the latest `android` workflow run and sideload it (the phone must
+Every tagged release ships `susurri-android.apk`; between releases CI builds a
+signed APK on every push to `main` — grab the `susurri-android-apk` artifact
+from the latest `android` workflow run. Either way, sideload it (the phone must
 allow installs from unknown sources). To build locally you need the Android
 workload and a JDK:
 
