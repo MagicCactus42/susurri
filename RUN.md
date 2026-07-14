@@ -15,8 +15,17 @@ Running a node needs **no database**. Postgres is only used by the optional
 
 ## Option A — prebuilt self-contained binary (recommended, no .NET needed)
 
-The build under `dist/` bundles the .NET 10 runtime and libsodium, so on Arch you
-need nothing installed (glibc is already present).
+Every tagged release ships GUI **and** CLI for all three desktop platforms
+(verify against the signed `SHA256SUMS`, see `deploy/SIGNING.md`):
+
+| Platform | GUI | TUI/CLI |
+|---|---|---|
+| Windows | `susurri-setup-x64.exe` (installer, auto-updates, bundles the CLI) | `Susurri.CLI.exe` inside the install dir |
+| Linux | `susurri-linux-x64.AppImage` (`chmod +x`, run; needs libfuse2 on some distros) | `susurri-cli-linux-x64.tar.gz` |
+| macOS | `susurri-macos-arm64.pkg` / `susurri-macos-x64.pkg` (also inside: `Susurri.app/Contents/MacOS/susurri-cli`) | `susurri-cli-macos-{arch}.tar.gz` |
+
+The binaries bundle the .NET 10 runtime and libsodium, so nothing else needs to
+be installed. Alternatively build the same layout locally:
 
 ```bash
 # from the repo root, after: dotnet publish ... -o ./dist   (see Option B to build)
@@ -91,6 +100,9 @@ export DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$PATH"
 
 # run directly
 dotnet run --project src/Bootstrapper/Susurri.CLI -- --bootstrap -p 7070
+
+# the desktop gui runs on linux/macos/windows alike
+dotnet run --project src/Bootstrapper/Susurri.GUI
 
 # or produce the self-contained ./dist used in Option A
 dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj \

@@ -1,0 +1,270 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'version for a dry run (e.g. 1.2.3); artifacts are uploaded to the run, no GitHub release is created'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  ContinuousIntegrationBuild: 'true'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.derive.outputs.version }}
+    steps:
+      - name: derive version
+        id: derive
+        env:
+          RAW_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          version="${RAW_VERSION#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "not a semver version: '$RAW_VERSION'" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: validate dependency graph against committed lockfile (locked mode)
+        run: |
+          dotnet restore src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj
+          dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
+
+      - name: publish gui
+        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r win-x64 --self-contained -o staging /p:RestoreLockedMode=false /p:Version=${{ needs.version.outputs.version }}
+
+      - name: publish cli into the same install
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r win-x64 --self-contained -o staging /p:RestoreLockedMode=false /p:Version=${{ needs.version.outputs.version }}
+
+      - name: install velopack cli
+        run: dotnet tool install -g vpk
+
+      # fetches the previous full package so vpk pack can emit a delta; the first release has nothing to fetch
+      - name: download previous release for delta generation
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token $env:GH_TOKEN --outputDir Releases
+
+      - name: vpk pack
+        run: vpk pack --packId Susurri --packVersion ${{ needs.version.outputs.version }} --packDir staging --mainExe Susurri.GUI.exe --packTitle Susurri --packAuthors Susurri --outputDir Releases
+
+      # drop the previous version's package pulled in for delta generation; keep only this version's nupkgs
+      - name: stage release assets
+        run: |
+          $version = [regex]::Escape('${{ needs.version.outputs.version }}')
+          Get-ChildItem Releases -File -Filter '*.nupkg' |
+            Where-Object { $_.Name -notmatch "-$version(-win)?-(full|delta)\.nupkg$" } |
+            Remove-Item
+          Copy-Item Releases/Susurri-win-Setup.exe Releases/susurri-setup-x64.exe
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-windows
+          path: Releases/
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: validate dependency graph against committed lockfile (locked mode)
+        run: |
+          dotnet restore src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj
+          dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
+
+      - name: publish gui
+        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r linux-x64 --self-contained -o staging /p:RestoreLockedMode=false /p:Version=$VERSION
+
+      - name: publish cli
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r linux-x64 --self-contained -o staging-cli /p:RestoreLockedMode=false /p:Version=$VERSION
+
+      # the cli rides inside the appimage install too, same as on windows
+      - name: merge cli into gui staging
+        run: cp -a staging-cli/. staging/
+
+      - name: install velopack cli
+        run: dotnet tool install -g vpk
+
+      - name: download previous release for delta generation
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token "$GH_TOKEN" --channel linux-x64 --outputDir Releases
+
+      - name: vpk pack
+        run: vpk pack --packId Susurri --packVersion "$VERSION" --packDir staging --mainExe Susurri.GUI --packTitle Susurri --packAuthors Susurri --channel linux-x64 --outputDir Releases
+
+      - name: stage release assets
+        run: |
+          shopt -s nullglob
+          for f in Releases/*.nupkg; do
+            case "$(basename "$f")" in
+              Susurri-"$VERSION"-linux-x64-full.nupkg|Susurri-"$VERSION"-linux-x64-delta.nupkg) ;;
+              *) rm "$f" ;;
+            esac
+          done
+          appimage=$(ls Releases/*.AppImage | head -1)
+          if [ "$appimage" != "Releases/susurri-linux-x64.AppImage" ]; then
+            cp "$appimage" Releases/susurri-linux-x64.AppImage
+          fi
+          tar -C staging-cli -czf Releases/susurri-cli-linux-x64.tar.gz .
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-linux
+          path: Releases/
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      - name: validate dependency graph against committed lockfile (locked mode)
+        run: |
+          dotnet restore src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj
+          dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
+
+      - name: publish gui
+        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r osx-$ARCH --self-contained -o staging /p:RestoreLockedMode=false /p:Version=$VERSION
+
+      - name: publish cli
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r osx-$ARCH --self-contained -o staging-cli /p:RestoreLockedMode=false /p:Version=$VERSION
+
+      # the cli lands in Susurri.app/Contents/MacOS next to the gui, runnable from a terminal
+      - name: merge cli into gui staging
+        run: cp -a staging-cli/. staging/
+
+      - name: install velopack cli
+        run: dotnet tool install -g vpk
+
+      - name: download previous release for delta generation
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token "$GH_TOKEN" --channel osx-$ARCH --outputDir Releases
+
+      - name: vpk pack
+        run: vpk pack --packId Susurri --packVersion "$VERSION" --packDir staging --mainExe Susurri.GUI --packTitle Susurri --packAuthors Susurri --channel osx-$ARCH --outputDir Releases
+
+      - name: stage release assets
+        run: |
+          shopt -s nullglob
+          for f in Releases/*.nupkg; do
+            case "$(basename "$f")" in
+              Susurri-"$VERSION"-osx-"$ARCH"-full.nupkg|Susurri-"$VERSION"-osx-"$ARCH"-delta.nupkg) ;;
+              *) rm "$f" ;;
+            esac
+          done
+          pkg=$(ls Releases/*.pkg | head -1)
+          if [ "$pkg" != "Releases/susurri-macos-$ARCH.pkg" ]; then
+            cp "$pkg" "Releases/susurri-macos-$ARCH.pkg"
+          fi
+          tar -C staging-cli -czf "Releases/susurri-cli-macos-$ARCH.tar.gz" .
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: Releases/
+          if-no-files-found: error
+
+  publish:
+    needs: [version, windows, linux, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          path: Releases
+          merge-multiple: true
+
+      - name: generate SHA256SUMS
+        run: |
+          cd Releases
+          rm -f SHA256SUMS SHA256SUMS.asc
+          ls -1 | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: sign SHA256SUMS with the release key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::warning::GPG_PRIVATE_KEY secret is not set — SHA256SUMS will ship UNSIGNED. See deploy/SIGNING.md."
+            exit 0
+          fi
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --armor --detach-sign --output Releases/SHA256SUMS.asc Releases/SHA256SUMS
+          gpg --verify Releases/SHA256SUMS.asc Releases/SHA256SUMS
+          echo "signed SHA256SUMS -> SHA256SUMS.asc"
+
+      - name: create github release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create '${{ github.ref_name }}' --verify-tag --title 'Susurri ${{ needs.version.outputs.version }}' --generate-notes Releases/*
+
+      - name: upload dry-run artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v5
+        with:
+          name: susurri-release-${{ needs.version.outputs.version }}
+          path: Releases/

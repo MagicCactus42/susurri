@@ -45,7 +45,7 @@ Then **delete `release-private.asc` from disk** (`shred -u release-private.asc`)
 
 ### What CI does with it
 
-`.github/workflows/release-windows.yml` imports the key and runs:
+`.github/workflows/release.yml` gathers the artifacts from every platform job (Windows setup, Linux AppImage, macOS pkgs, CLI tarballs), generates one combined `SHA256SUMS`, imports the key and runs:
 
 ```
 gpg --armor --detach-sign --output Releases/SHA256SUMS.asc Releases/SHA256SUMS
@@ -156,7 +156,7 @@ and compares the certificate digest against the one you publish (add it to `READ
 
 ## 5. Windows Authenticode (optional, later)
 
-GPG proves the `SHA256SUMS` manifest; it does not stop Windows SmartScreen warning on an unsigned `.exe`. Authenticode signing of `susurri-setup-x64.exe` needs a code-signing certificate (OV or EV from a CA, or Azure Trusted Signing). When you have one, add a step in `release-windows.yml` after `vpk pack`:
+GPG proves the `SHA256SUMS` manifest; it does not stop Windows SmartScreen warning on an unsigned `.exe`. Authenticode signing of `susurri-setup-x64.exe` needs a code-signing certificate (OV or EV from a CA, or Azure Trusted Signing). When you have one, add a step in `release.yml` (windows job) after `vpk pack`:
 
 ```
 # with a PFX in secrets (base64) + password:
@@ -164,6 +164,12 @@ signtool sign /fd SHA256 /f cert.pfx /p $env:CERT_PASSWORD /tr http://timestamp.
 ```
 
 Velopack can also invoke a signing command during `vpk pack` via `--signParams`. Until then, the GPG-signed `SHA256SUMS` is the trust anchor and the site documents that flow.
+
+---
+
+## 6. macOS notarization (optional, later)
+
+The `.pkg` installers ship unsigned, so Gatekeeper warns on first launch (right-click → Open works). Proper fixes need an Apple Developer ID ($99/yr): `vpk pack` accepts `--signAppIdentity`/`--signInstallIdentity` plus `--notaryProfile` on a macOS runner with the certificates imported into the keychain. Until then the GPG-signed `SHA256SUMS` is the trust anchor, same as on Windows.
 
 ---
 
