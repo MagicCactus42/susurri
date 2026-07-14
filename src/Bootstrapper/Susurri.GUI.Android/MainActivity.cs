@@ -49,8 +49,8 @@ public class MainActivity : AvaloniaMainActivity<App>
         var text = new TextView(this)
         {
             Text = "Susurri failed to start.\n\n" + ex,
-            TextSize = 11,
         };
+        text.SetTextSize(ComplexUnitType.Sp, 11);
         text.SetPadding(28, 48, 28, 28);
         text.SetTextIsSelectable(true);
 
@@ -64,7 +64,7 @@ public class MainActivity : AvaloniaMainActivity<App>
     {
         if (ex == null)
             return;
-        Log.Error(Tag, Throwable.FromException(ex), "unhandled");
+        Log.Error(Tag, ex.ToString());
         try
         {
             var dir = global::Android.App.Application.Context.GetExternalFilesDir(null)?.AbsolutePath
