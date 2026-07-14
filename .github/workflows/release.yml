@@ -322,7 +322,8 @@ jobs:
         run: |
           cd Releases
           rm -f SHA256SUMS SHA256SUMS.asc
-          ls -1 | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
+          ls -1 | LC_ALL=C sort | xargs sha256sum > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
           cat SHA256SUMS
 
       - name: sign SHA256SUMS with the release key
