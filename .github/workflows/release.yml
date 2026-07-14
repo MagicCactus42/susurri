@@ -144,7 +144,7 @@ jobs:
           done
           appimage=$(ls Releases/*.AppImage | head -1)
           if [ "$appimage" != "Releases/susurri-linux-x64.AppImage" ]; then
-            cp "$appimage" Releases/susurri-linux-x64.AppImage
+            mv "$appimage" Releases/susurri-linux-x64.AppImage
           fi
           tar -C staging-cli -czf Releases/susurri-cli-linux-x64.tar.gz .
 
