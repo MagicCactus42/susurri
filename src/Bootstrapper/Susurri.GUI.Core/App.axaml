@@ -4,7 +4,7 @@
              RequestedThemeVariant="Dark">
     <Application.Styles>
         <FluentTheme />
-        <StyleInclude Source="avares://Susurri.GUI/Styles/AppStyles.axaml" />
+        <StyleInclude Source="avares://Susurri.GUI.Core/Styles/AppStyles.axaml" />
     </Application.Styles>
 
     <Application.Resources>
@@ -41,8 +41,8 @@
             <SolidColorBrush x:Key="ErrBrush" Color="{StaticResource ErrColor}" />
             <SolidColorBrush x:Key="SelectionBrush" Color="{StaticResource SelectionColor}" />
 
-            <FontFamily x:Key="CondFont">Bahnschrift, Arial Narrow, Segoe UI, Inter</FontFamily>
-            <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono</FontFamily>
+            <FontFamily x:Key="CondFont">Bahnschrift, Arial Narrow, Roboto Condensed, sans-serif-condensed, Segoe UI, Inter</FontFamily>
+            <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, Roboto Mono, Droid Sans Mono, monospace</FontFamily>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

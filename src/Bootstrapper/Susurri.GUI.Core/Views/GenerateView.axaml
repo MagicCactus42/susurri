@@ -6,7 +6,7 @@
              Background="{StaticResource GroundBrush}">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Width="560" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,48">
+        <StackPanel MaxWidth="560" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="24,48">
             <TextBlock Classes="cond" Text="NEW IDENTITY" FontSize="22" LetterSpacing="8"
                        HorizontalAlignment="Center" Margin="8,0,0,6" />
             <TextBlock Classes="label" Text="A BIP39 PASSPHRASE IS THE ENTIRE ACCOUNT"
@@ -22,7 +22,7 @@
             <ItemsControl ItemsSource="{Binding Words}" IsVisible="{Binding HasWords}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <UniformGrid Columns="4" />
+                        <WrapPanel HorizontalAlignment="Center" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>

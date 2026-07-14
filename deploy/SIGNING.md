@@ -115,7 +115,46 @@ To enforce it on the repo (optional), enable branch protection → "Require sign
 
 ---
 
-## 4. Windows Authenticode (optional, later)
+## 4. Android APK signing
+
+Every push to `main` builds an APK (`.github/workflows/android.yml`). Android requires every APK to be signed; without your keystore the workflow falls back to a **throwaway debug signature** and logs a warning — installable, but every CI run signs with a different identity, so updates won't install over an old build and users can't pin a signer.
+
+Generate a dedicated release keystore once:
+
+```bash
+bash scripts/generate-android-keystore.sh
+```
+
+The script creates `susurri-release.keystore` (RSA-4096, PKCS12, ~30 years) and prints the four `gh secret set` commands to run:
+
+- `ANDROID_KEYSTORE_BASE64` — the keystore file, base64-encoded.
+- `ANDROID_KEYSTORE_PASS` — the keystore password.
+- `ANDROID_KEY_PASS` — the key password (same value for PKCS12).
+- `ANDROID_KEY_ALIAS` — the key alias (defaults to `susurri` if unset).
+
+Then **back the keystore up offline and `shred -u` the local copy**. Unlike the GPG key this one is unrecoverable-critical: Android identifies an app by its signing certificate, so a lost keystore means existing installs can never update.
+
+### What CI does with it
+
+`android.yml` decodes the keystore into the runner's temp dir and passes it to `dotnet publish` via `AndroidKeyStore`/`AndroidSigningKeyStore` properties (passwords travel as `env:` references, never on the command line), then proves the result with:
+
+```
+apksigner verify --print-certs com.susurri.app-Signed.apk
+```
+
+The signed APK is uploaded as the `susurri-android-apk` workflow artifact on every build.
+
+### What a user runs to verify
+
+```
+apksigner verify --print-certs susurri.apk
+```
+
+and compares the certificate digest against the one you publish (add it to `README.md` next to the GPG fingerprint once the keystore exists).
+
+---
+
+## 5. Windows Authenticode (optional, later)
 
 GPG proves the `SHA256SUMS` manifest; it does not stop Windows SmartScreen warning on an unsigned `.exe`. Authenticode signing of `susurri-setup-x64.exe` needs a code-signing certificate (OV or EV from a CA, or Azure Trusted Signing). When you have one, add a step in `release-windows.yml` after `vpk pack`:
 
@@ -133,4 +172,5 @@ Velopack can also invoke a signing command during `vpk pack` via `--signParams`.
 - [ ] Generate the release GPG key, add `GPG_PRIVATE_KEY` + `GPG_PASSPHRASE` secrets, commit `deploy/release-pubkey.asc`, publish to a keyserver.
 - [ ] Replace the three placeholder strings in `docs/index.html` and `docs/site.js`, and pin the fingerprint in `README.md`.
 - [ ] Turn on commit signing (SSH is easiest) and add the signing key to GitHub.
+- [ ] Generate the Android keystore (`scripts/generate-android-keystore.sh`), add the four `ANDROID_*` secrets, back the keystore up offline.
 - [ ] (Later) Buy a code-signing cert and add Authenticode to the release workflow.

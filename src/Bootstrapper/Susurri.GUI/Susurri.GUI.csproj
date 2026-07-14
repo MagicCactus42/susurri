@@ -11,24 +11,11 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Desktop" />
-    <PackageReference Include="Avalonia.Themes.Fluent" />
-    <PackageReference Include="Avalonia.Fonts.Inter" />
-    <PackageReference Include="Avalonia.ReactiveUI" />
     <PackageReference Include="Avalonia.Diagnostics" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Avalonia.ReactiveUI" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="appsettings.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Application\Susurri.Modules.IAM.Application.csproj" />
-    <ProjectReference Include="..\..\Modules\IAM\Susurri.Modules.IAM.Core\Susurri.Modules.IAM.Core.csproj" />
-    <ProjectReference Include="..\..\Modules\DHT\Susurri.Modules.DHT.Core\Susurri.Modules.DHT.Core.csproj" />
-    <ProjectReference Include="..\..\Shared\Susurri.Shared.Abstractions\Susurri.Shared.Abstractions.csproj" />
-    <ProjectReference Include="..\..\Shared\Susurri.Shared.Infrastructure\Susurri.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\Susurri.GUI.Core\Susurri.GUI.Core.csproj" />
   </ItemGroup>
 </Project>

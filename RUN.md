@@ -101,6 +101,25 @@ dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj \
 > Windows-only WPF demo (`net10.0-windows`) and won't compile here. Build the
 > CLI project (and, if you want, the test projects) directly.
 
+### Android
+
+CI builds a signed APK on every push to `main` — grab the `susurri-android-apk`
+artifact from the latest `android` workflow run and sideload it (the phone must
+allow installs from unknown sources). To build locally you need the Android
+workload and a JDK:
+
+```bash
+dotnet workload install android
+
+dotnet publish src/Bootstrapper/Susurri.GUI.Android/Susurri.GUI.Android.csproj \
+  -c Release -f net10.0-android -o ./dist-android
+```
+
+Without signing secrets the APK carries a debug signature — fine for sideloading,
+see `deploy/SIGNING.md` for the release keystore. Bootstrap seeds come from the
+`appsettings.json` embedded at build time; there is no way to set environment
+variables on a stock phone.
+
 ---
 
 ## Using it as a messenger

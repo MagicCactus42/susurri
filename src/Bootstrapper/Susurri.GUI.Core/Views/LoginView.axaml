@@ -6,7 +6,7 @@
              Background="{StaticResource GroundBrush}">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Width="460" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,48" Spacing="0">
+        <StackPanel MaxWidth="460" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="24,48" Spacing="0">
             <TextBlock Classes="cond" Text="SUSURRI" FontSize="30" LetterSpacing="14"
                        HorizontalAlignment="Center" Margin="14,0,0,6" />
             <TextBlock Classes="label" Text="NO SERVERS · NO ACCOUNTS · NO PHONE NUMBERS"

@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -23,14 +24,14 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         var services = new ServiceCollection();
-        ConfigureServices(services);
+        ConfigureServices(services, ApplicationLifetime is ISingleViewApplicationLifetime);
         Services = services.BuildServiceProvider();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new MainWindow
             {
-                DataContext = Services.GetRequiredService<MainWindowViewModel>()
+                DataContext = Services.GetRequiredService<MainViewModel>()
             };
             desktop.Exit += (_, _) =>
             {
@@ -43,14 +44,27 @@ public partial class App : Application
                 }
             };
         }
+        else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+        {
+            singleView.MainView = new MobileMainView
+            {
+                DataContext = Services.GetRequiredService<MainViewModel>()
+            };
+        }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    private static void ConfigureServices(IServiceCollection services)
+    private static void ConfigureServices(IServiceCollection services, bool isMobile)
     {
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(AppContext.BaseDirectory)
+        var builder = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory);
+
+        var embedded = Assembly.GetEntryAssembly()?.GetManifestResourceStream("appsettings.json");
+        if (embedded != null)
+            builder.AddJsonStream(embedded);
+
+        var configuration = builder
             .AddJsonFile("appsettings.json", optional: true)
             .AddEnvironmentVariables()
             .Build();
@@ -59,6 +73,8 @@ public partial class App : Application
         services.AddLogging();
         services.AddIam();
         services.AddSingleton<AppSession>();
-        services.AddSingleton<MainWindowViewModel>();
+        services.AddSingleton(sp => new MainViewModel(
+            sp.GetRequiredService<AppSession>(),
+            autoSelectConversation: !isMobile));
     }
 }

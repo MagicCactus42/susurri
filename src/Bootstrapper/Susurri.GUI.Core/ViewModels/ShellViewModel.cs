@@ -31,7 +31,7 @@ public class ShellViewModel : ViewModelBase, IDisposable
     private int _pinnedCount;
     private int _verifiedCount;
 
-    public ShellViewModel(AppSession session, Action onLoggedOut)
+    public ShellViewModel(AppSession session, Action onLoggedOut, bool autoSelectConversation = true)
     {
         _session = session;
         _onLoggedOut = onLoggedOut;
@@ -51,6 +51,7 @@ public class ShellViewModel : ViewModelBase, IDisposable
         InviteCommand = new RelayCommand(() => _ = InviteAsync());
         RotateCommand = new RelayCommand(() => _ = RotateAsync());
         LeaveCommand = new RelayCommand(Leave);
+        CloseConversationCommand = new RelayCommand(() => SelectConversation(null));
         LogoutCommand = new RelayCommand(() => _ = LogoutAsync());
         ShowChatsCommand = new RelayCommand(() => Section = "chats");
         ShowContactsCommand = new RelayCommand(() => Section = "contacts");
@@ -62,7 +63,8 @@ public class ShellViewModel : ViewModelBase, IDisposable
         _timer.Tick += (_, _) => UpdateNetwork();
         _timer.Start();
 
-        SelectConversation(Store.Groups.FirstOrDefault() ?? Store.Directs.FirstOrDefault());
+        if (autoSelectConversation)
+            SelectConversation(Store.Groups.FirstOrDefault() ?? Store.Directs.FirstOrDefault());
     }
 
     public ConversationStore Store { get; }
@@ -76,6 +78,7 @@ public class ShellViewModel : ViewModelBase, IDisposable
     public RelayCommand InviteCommand { get; }
     public RelayCommand RotateCommand { get; }
     public RelayCommand LeaveCommand { get; }
+    public RelayCommand CloseConversationCommand { get; }
     public RelayCommand LogoutCommand { get; }
     public RelayCommand ShowChatsCommand { get; }
     public RelayCommand ShowContactsCommand { get; }
@@ -98,6 +101,7 @@ public class ShellViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsContacts));
             OnPropertyChanged(nameof(IsTransfers));
             OnPropertyChanged(nameof(IsNode));
+            OnPropertyChanged(nameof(IsConversationOpen));
             if (IsChats && SelectedConversation is { } conversation)
                 conversation.Unread = 0;
         }
@@ -150,6 +154,7 @@ public class ShellViewModel : ViewModelBase, IDisposable
             InviteCode = string.Empty;
             ChatError = string.Empty;
             OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(IsConversationOpen));
             OnPropertyChanged(nameof(SelectedIsGroup));
             OnPropertyChanged(nameof(SelectedIsOwnedGroup));
             OnPropertyChanged(nameof(SelectedIsDirect));
@@ -177,6 +182,7 @@ public class ShellViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasSelection => _selectedConversation != null;
+    public bool IsConversationOpen => IsChats && _selectedConversation != null;
     public bool SelectedIsGroup => _selectedConversation?.IsGroup == true;
     public bool SelectedIsOwnedGroup => _selectedConversation is { IsGroup: true, IsOwner: true };
     public bool SelectedIsDirect => _selectedConversation is { IsGroup: false };

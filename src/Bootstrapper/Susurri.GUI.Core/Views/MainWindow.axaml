@@ -3,7 +3,7 @@
         xmlns:vm="using:Susurri.GUI.ViewModels"
         xmlns:views="using:Susurri.GUI.Views"
         x:Class="Susurri.GUI.Views.MainWindow"
-        x:DataType="vm:MainWindowViewModel"
+        x:DataType="vm:MainViewModel"
         Title="susurri"
         Width="1240" Height="760"
         MinWidth="1000" MinHeight="620"

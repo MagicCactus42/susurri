@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Susurri.GUI.ViewModels"
+             xmlns:views="using:Susurri.GUI.Views"
+             x:Class="Susurri.GUI.Views.MobileMainView"
+             x:DataType="vm:MainViewModel"
+             FontFamily="{StaticResource MonoFont}"
+             Background="{StaticResource GroundBrush}">
+
+    <ContentControl Content="{Binding CurrentView}">
+        <ContentControl.DataTemplates>
+            <DataTemplate DataType="vm:LoginViewModel">
+                <views:LoginView />
+            </DataTemplate>
+            <DataTemplate DataType="vm:GenerateViewModel">
+                <views:GenerateView />
+            </DataTemplate>
+            <DataTemplate DataType="vm:ShellViewModel">
+                <views:MobileShellView />
+            </DataTemplate>
+        </ContentControl.DataTemplates>
+    </ContentControl>
+</UserControl>
