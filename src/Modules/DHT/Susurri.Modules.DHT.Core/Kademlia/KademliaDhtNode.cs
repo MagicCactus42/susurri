@@ -120,22 +120,42 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     public async Task StartAsync(int port)
     {
         _cts = new CancellationTokenSource();
-        _listener = new TcpListener(IPAddress.Any, port);
-        _listener.Start();
-        LocalEndPoint = (IPEndPoint)_listener.LocalEndpoint;
-        LocalPort = LocalEndPoint.Port;
+
+        // Bind UDP to the *resolved* TCP port (not the original argument, which
+        // may be 0 for ephemeral) so a peer that knows our listening port can
+        // reach us on the same number over either transport. Windows reserves
+        // arbitrary UDP port ranges (Hyper-V/WinNAT), so the ephemeral TCP port
+        // may be unbindable over UDP — retry with a fresh one.
+        for (var attempt = 1; ; attempt++)
+        {
+            _listener = new TcpListener(IPAddress.Any, port);
+            _listener.Start();
+            LocalEndPoint = (IPEndPoint)_listener.LocalEndpoint;
+            LocalPort = LocalEndPoint.Port;
+
+            if (_udp == null)
+                break;
+
+            try
+            {
+                _udp.Start(LocalPort);
+                break;
+            }
+            catch (SocketException ex) when (port == 0 && attempt < 10)
+            {
+                _logger.LogWarning("UDP bind on port {Port} failed ({Error}); retrying with a new ephemeral port",
+                    LocalPort, ex.SocketErrorCode);
+                _listener.Stop();
+            }
+        }
 
         _logger.LogInformation("Kademlia DHT Node {NodeId} started on port {Port}",
-            LocalId.ToString()[..16], port);
+            LocalId.ToString()[..16], LocalPort);
 
         _listenTask = ListenAsync(_cts.Token);
 
         if (_udp != null)
         {
-            // Bind UDP to the *resolved* TCP port (not the original argument, which
-            // may be 0 for ephemeral) so a peer that knows our listening port can
-            // reach us on the same number over either transport.
-            _udp.Start(LocalPort);
             _udp.LocalNodeId = LocalId.Bytes.ToArray();
             _udp.OnMessage += HandleUdpMessageAsync;
 
