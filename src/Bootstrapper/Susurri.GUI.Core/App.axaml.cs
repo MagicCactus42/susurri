@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.Configuration;
@@ -46,10 +47,25 @@ public partial class App : Application
         }
         else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
-            singleView.MainView = new MobileMainView
+            try
             {
-                DataContext = Services.GetRequiredService<MainViewModel>()
-            };
+                singleView.MainView = new MobileMainView
+                {
+                    DataContext = Services.GetRequiredService<MainViewModel>()
+                };
+            }
+            catch (Exception ex)
+            {
+                singleView.MainView = new ScrollViewer
+                {
+                    Content = new SelectableTextBlock
+                    {
+                        Margin = new Thickness(24, 48, 24, 24),
+                        FontSize = 11,
+                        Text = "Susurri failed to start.\n\n" + ex
+                    }
+                };
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
