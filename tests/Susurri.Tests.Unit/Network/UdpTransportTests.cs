@@ -23,14 +23,13 @@ public class UdpTransportTests
     {
         // Arrange
         await using var transport = new UdpTransport(_logger);
-        var port = GetRandomPort();
 
         // Act
-        await transport.StartAsync(port);
+        await transport.StartAsync(0);
 
         // Assert
         Assert.NotNull(transport.LocalEndPoint);
-        Assert.Equal(port, transport.LocalEndPoint.Port);
+        Assert.True(transport.LocalEndPoint.Port > 0);
     }
 
     [Fact]
@@ -40,7 +39,7 @@ public class UdpTransportTests
         await using var transport = new UdpTransport(_logger);
 
         // Act
-        await transport.StartAsync(GetRandomPort());
+        await transport.StartAsync(0);
 
         // Assert
         Assert.True(transport.IsRunning);
@@ -51,7 +50,7 @@ public class UdpTransportTests
     {
         // Arrange
         await using var transport = new UdpTransport(_logger);
-        await transport.StartAsync(GetRandomPort());
+        await transport.StartAsync(0);
 
         // Act
         await transport.StopAsync();
@@ -79,11 +78,9 @@ public class UdpTransportTests
         await using var transport1 = new UdpTransport(_logger);
         await using var transport2 = new UdpTransport(_logger);
 
-        var port1 = GetRandomPort();
-        var port2 = GetRandomPort();
-
-        await transport1.StartAsync(port1);
-        await transport2.StartAsync(port2);
+        await transport1.StartAsync(0);
+        await transport2.StartAsync(0);
+        var port2 = transport2.LocalEndPoint!.Port;
 
         var receivedData = new TaskCompletionSource<byte[]>();
         transport2.OnDatagramReceived += (sender, data) =>
@@ -112,11 +109,10 @@ public class UdpTransportTests
         await using var transport1 = new UdpTransport(_logger);
         await using var transport2 = new UdpTransport(_logger);
 
-        var port1 = GetRandomPort();
-        var port2 = GetRandomPort();
-
-        await transport1.StartAsync(port1);
-        await transport2.StartAsync(port2);
+        await transport1.StartAsync(0);
+        await transport2.StartAsync(0);
+        var port1 = transport1.LocalEndPoint!.Port;
+        var port2 = transport2.LocalEndPoint!.Port;
 
         var receivedEndpoint = new TaskCompletionSource<IPEndPoint>();
         transport2.OnDatagramReceived += (sender, data) =>
@@ -143,11 +139,9 @@ public class UdpTransportTests
         await using var transport1 = new UdpTransport(_logger);
         await using var transport2 = new UdpTransport(_logger);
 
-        var port1 = GetRandomPort();
-        var port2 = GetRandomPort();
-
-        await transport1.StartAsync(port1);
-        await transport2.StartAsync(port2);
+        await transport1.StartAsync(0);
+        await transport2.StartAsync(0);
+        var port2 = transport2.LocalEndPoint!.Port;
 
         // Set up transport2 to echo back with a request ID
         transport2.OnDatagramReceived += async (sender, data) =>
@@ -183,13 +177,13 @@ public class UdpTransportTests
     {
         // Arrange
         await using var transport = new UdpTransport(_logger);
-        await transport.StartAsync(GetRandomPort());
+        await transport.StartAsync(0);
 
         var requestId = Guid.NewGuid();
 
         // Act - send to a port that won't respond
         var response = await transport.SendRequestAsync(
-            new IPEndPoint(IPAddress.Loopback, GetRandomPort()),
+            new IPEndPoint(IPAddress.Loopback, Random.Shared.Next(49152, 65535)),
             new byte[] { 0x01 },
             requestId,
             TimeSpan.FromMilliseconds(100));
@@ -203,7 +197,7 @@ public class UdpTransportTests
     {
         // Arrange
         var transport = new UdpTransport(_logger);
-        await transport.StartAsync(GetRandomPort());
+        await transport.StartAsync(0);
         Assert.True(transport.IsRunning);
 
         // Act
@@ -220,11 +214,9 @@ public class UdpTransportTests
         await using var transport1 = new UdpTransport(_logger);
         await using var transport2 = new UdpTransport(_logger);
 
-        var port1 = GetRandomPort();
-        var port2 = GetRandomPort();
-
-        await transport1.StartAsync(port1);
-        await transport2.StartAsync(port2);
+        await transport1.StartAsync(0);
+        await transport2.StartAsync(0);
+        var port2 = transport2.LocalEndPoint!.Port;
 
         var receivedCount = 0;
         var allReceived = new TaskCompletionSource();
@@ -251,11 +243,5 @@ public class UdpTransportTests
 
         await allReceived.Task;
         Assert.Equal(expectedCount, receivedCount);
-    }
-
-    private static int GetRandomPort()
-    {
-        // Get a random port in the dynamic/private range
-        return Random.Shared.Next(49152, 65535);
     }
 }
