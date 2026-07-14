@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Susurri.Shared.Abstractions.Security;
 
 namespace Susurri.Modules.DHT.Core.Onion.GroupChat;
 
@@ -139,6 +140,8 @@ public sealed class EncryptedGroupMessage
         var nonceLen = reader.ReadByte();
         var nonce = reader.ReadBytes(nonceLen);
         var ciphertextLen = reader.ReadInt32();
+        if (ciphertextLen < 0 || ciphertextLen > SecurityLimits.MaxValueSize)
+            throw new InvalidDataException($"EncryptedGroupMessage ciphertext length {ciphertextLen} out of range");
         var ciphertext = reader.ReadBytes(ciphertextLen);
         var keyVersion = reader.ReadInt32();
 
