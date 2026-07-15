@@ -385,11 +385,22 @@ public sealed class ReplyPath
 
 public sealed class ChatMessage
 {
+    private const int MaxRatchetEnvelope = 64 * 1024;
+
     public byte[] SenderPublicKey { get; init; } = Array.Empty<byte>();
     public byte[] SenderSigningPublicKey { get; init; } = Array.Empty<byte>();
     public string Content { get; init; } = string.Empty;
     public long Timestamp { get; init; }
     public Guid MessageId { get; init; } = Guid.NewGuid();
+
+    /// <summary>
+    /// When non-empty, the message content is sealed end-to-end by the Double
+    /// Ratchet and <see cref="Content"/> is empty; the recipient decrypts this
+    /// with the per-peer ratchet session. Empty for legacy plaintext-content
+    /// messages. Covered by the signature.
+    /// </summary>
+    public byte[] RatchetEnvelope { get; init; } = Array.Empty<byte>();
+
     public byte[] Signature { get; set; } = Array.Empty<byte>();
 
     public byte[] GetSignableData()
@@ -404,6 +415,8 @@ public sealed class ChatMessage
         writer.Write(Content);
         writer.Write(Timestamp);
         writer.Write(MessageId.ToByteArray());
+        writer.Write(RatchetEnvelope.Length);
+        writer.Write(RatchetEnvelope);
 
         return ms.ToArray();
     }
@@ -420,6 +433,8 @@ public sealed class ChatMessage
         writer.Write(Content);
         writer.Write(Timestamp);
         writer.Write(MessageId.ToByteArray());
+        writer.Write(RatchetEnvelope.Length);
+        writer.Write(RatchetEnvelope);
         writer.Write((ushort)Signature.Length);
         writer.Write(Signature);
 
@@ -438,6 +453,10 @@ public sealed class ChatMessage
         var content = reader.ReadString();
         var timestamp = reader.ReadInt64();
         var messageId = new Guid(reader.ReadBytes(16));
+        var envelopeLen = reader.ReadInt32();
+        if (envelopeLen < 0 || envelopeLen > MaxRatchetEnvelope)
+            throw new InvalidDataException($"Invalid ratchet envelope length: {envelopeLen}");
+        var ratchetEnvelope = reader.ReadBytes(envelopeLen);
         var sigLen = reader.ReadUInt16();
         var signature = reader.ReadBytes(sigLen);
 
@@ -448,6 +467,7 @@ public sealed class ChatMessage
             Content = content,
             Timestamp = timestamp,
             MessageId = messageId,
+            RatchetEnvelope = ratchetEnvelope,
             Signature = signature
         };
     }

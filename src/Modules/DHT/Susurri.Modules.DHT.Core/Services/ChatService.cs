@@ -5,6 +5,7 @@ using Susurri.Modules.DHT.Core.Kademlia;
 using Susurri.Modules.DHT.Core.Network;
 using Susurri.Modules.DHT.Core.Onion;
 using Susurri.Modules.DHT.Core.Onion.GroupChat;
+using Susurri.Modules.DHT.Core.Onion.Ratchet;
 
 namespace Susurri.Modules.DHT.Core.Services;
 
@@ -25,6 +26,7 @@ public sealed class ChatService : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, ReceivedMessage> _receivedMessages = new();
 
     private readonly GroupManager _groupManager;
+    private readonly RatchetSessionManager _ratchet;
     private readonly ConcurrentDictionary<Guid, ReceivedGroupMessage> _receivedGroupMessages = new();
     private static readonly TimeSpan GroupFreshness = TimeSpan.FromMinutes(5);
 
@@ -70,6 +72,7 @@ public sealed class ChatService : IAsyncDisposable
         _connectionManager = new ConnectionManager(routingTable, _relayService, connectionLogger);
 
         _groupManager = new GroupManager(encryptionKey);
+        _ratchet = new RatchetSessionManager(encryptionKey);
 
         _router.OnMessageReceived += HandleIncomingMessageAsync;
         _router.OnAckReceived += HandleAckAsync;
@@ -259,11 +262,14 @@ public sealed class ChatService : IAsyncDisposable
             return new SendResult(false, null, "Cannot send messages without a signing key");
         }
 
+        var envelope = _ratchet.Seal(recipientKey.EncryptionPublicKey, System.Text.Encoding.UTF8.GetBytes(content));
+
         var message = new ChatMessage
         {
             SenderPublicKey = LocalPublicKey,
             SenderSigningPublicKey = LocalSigningPublicKey,
-            Content = content,
+            Content = string.Empty,
+            RatchetEnvelope = envelope,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             MessageId = Guid.NewGuid()
         };
@@ -361,6 +367,25 @@ public sealed class ChatService : IAsyncDisposable
 
     private async Task HandleIncomingMessageAsync(ChatMessage message, ReplyPath replyPath)
     {
+        string content;
+        if (message.RatchetEnvelope.Length > 0)
+        {
+            try
+            {
+                content = System.Text.Encoding.UTF8.GetString(
+                    _ratchet.Open(message.SenderPublicKey, message.RatchetEnvelope));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to decrypt ratchet message {MessageId}", message.MessageId);
+                return;
+            }
+        }
+        else
+        {
+            content = message.Content;
+        }
+
         var senderKeyHex = Convert.ToHexString(message.SenderPublicKey);
         string? senderUsername = null;
         foreach (var kvp in _keyCache)
@@ -375,7 +400,7 @@ public sealed class ChatService : IAsyncDisposable
         var received = new ReceivedMessage
         {
             MessageId = message.MessageId,
-            Content = message.Content,
+            Content = content,
             SenderPublicKey = message.SenderPublicKey,
             SenderUsername = senderUsername,
             Timestamp = DateTimeOffset.FromUnixTimeSeconds(message.Timestamp),
@@ -429,11 +454,14 @@ public sealed class ChatService : IAsyncDisposable
             return new SendResult(false, null, "Cannot send replies without a signing key");
         }
 
+        var replyEnvelope = _ratchet.Seal(original.SenderPublicKey, System.Text.Encoding.UTF8.GetBytes(content));
+
         var message = new ChatMessage
         {
             SenderPublicKey = LocalPublicKey,
             SenderSigningPublicKey = LocalSigningPublicKey,
-            Content = content,
+            Content = string.Empty,
+            RatchetEnvelope = replyEnvelope,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             MessageId = Guid.NewGuid()
         };
@@ -473,6 +501,7 @@ public sealed class ChatService : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         _groupManager.Dispose();
+        _ratchet.Dispose();
         await _connectionManager.DisposeAsync().ConfigureAwait(false);
         await _relayService.DisposeAsync().ConfigureAwait(false);
         await _dhtNode.DisposeAsync().ConfigureAwait(false);
