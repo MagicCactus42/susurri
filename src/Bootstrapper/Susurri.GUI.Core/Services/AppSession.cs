@@ -72,7 +72,10 @@ public sealed class AppSession : IAsyncDisposable
 
     public string GeneratePassphrase(int wordCount) => _keyGenerator.GeneratePassphrase(wordCount);
 
-    public async Task LoginAsync(string username, string passphrase, int port, IProgress<string>? progress = null)
+    public IReadOnlyList<string> ActiveSeeds { get; private set; } = Array.Empty<string>();
+
+    public async Task LoginAsync(string username, string passphrase, int port,
+        IReadOnlyList<string>? bootstrapNodes = null, IProgress<string>? progress = null)
     {
         if (IsLoggedIn)
             throw new InvalidOperationException($"Already online as '{Username}'.");
@@ -101,10 +104,12 @@ public sealed class AppSession : IAsyncDisposable
             keyPair.LocalStoreKey,
             _loggerFactory.CreateLogger<FileTransferService>());
 
+        var seeds = bootstrapNodes is { Count: > 0 } ? bootstrapNodes.Distinct().ToList() : Seeds();
+
         try
         {
             progress?.Report("joining the network — dht bootstrap · onion setup");
-            await chat.StartAsync(port, username, Seeds());
+            await chat.StartAsync(port, username, seeds);
         }
         catch
         {
@@ -118,6 +123,7 @@ public sealed class AppSession : IAsyncDisposable
 
         Chat = chat;
         Username = username;
+        ActiveSeeds = seeds;
         Conversations = new ConversationStore(chat, username, history);
         Changed?.Invoke();
     }
@@ -126,6 +132,7 @@ public sealed class AppSession : IAsyncDisposable
     {
         Conversations?.Dispose();
         Conversations = null;
+        ActiveSeeds = Array.Empty<string>();
         if (Chat != null)
         {
             await Chat.DisposeAsync();
@@ -148,6 +155,8 @@ public sealed class AppSession : IAsyncDisposable
 
     public static byte[] DeriveSalt(string username)
         => SHA256.HashData(Encoding.UTF8.GetBytes(IdentityDomain + username.Trim().ToLowerInvariant()));
+
+    public static string? NormalizeSeed(string value) => ParseEndpoint(value)?.ToString();
 
     private static IPEndPoint? ParseEndpoint(string? endpoint)
     {

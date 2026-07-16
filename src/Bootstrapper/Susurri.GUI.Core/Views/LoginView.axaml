@@ -46,6 +46,10 @@
             <TextBox Text="{Binding PortText}" Watermark="auto" Width="140" HorizontalAlignment="Left"
                      Margin="0,0,0,18" />
 
+            <TextBlock Classes="label" Text="BOOTSTRAP NODE — OPTIONAL" Margin="0,0,0,7" />
+            <TextBox Text="{Binding BootstrapText}" Watermark="ip:port — remembered on this device"
+                     Margin="0,0,0,18" />
+
             <CheckBox IsChecked="{Binding SaveCredentials}"
                       Content="remember on this device — encrypted with a separate password" />
             <TextBox Text="{Binding NewCachePin}" PasswordChar="●"

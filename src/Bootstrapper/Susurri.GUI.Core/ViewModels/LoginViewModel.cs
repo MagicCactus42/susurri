@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Susurri.GUI.Services;
@@ -15,6 +16,7 @@ public class LoginViewModel : ViewModelBase
     private string _username = string.Empty;
     private string _passphrase = string.Empty;
     private string _portText = string.Empty;
+    private string _bootstrapText = string.Empty;
     private string _cachePin = string.Empty;
     private string _newCachePin = string.Empty;
     private bool _saveCredentials;
@@ -28,6 +30,9 @@ public class LoginViewModel : ViewModelBase
         _onLoggedIn = onLoggedIn;
         _onGenerate = onGenerate;
         CacheAvailable = session.CacheExists;
+
+        var saved = GuiSettings.LoadBootstrapNodes();
+        _bootstrapText = string.Join(" ", saved.Length > 0 ? saved : session.Seeds());
 
         LoginCommand = new RelayCommand(() => _ = LoginAsync(), () => !IsBusy);
         UnlockCacheCommand = new RelayCommand(() => _ = UnlockCacheAsync(), () => !IsBusy);
@@ -69,6 +74,12 @@ public class LoginViewModel : ViewModelBase
     {
         get => _portText;
         set => SetField(ref _portText, value);
+    }
+
+    public string BootstrapText
+    {
+        get => _bootstrapText;
+        set => SetField(ref _bootstrapText, value);
     }
 
     public string CachePin
@@ -176,11 +187,26 @@ public class LoginViewModel : ViewModelBase
             return;
         }
 
+        var seeds = new List<string>();
+        foreach (var token in BootstrapText.Split(
+                     new[] { ' ', ',', ';', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var normalized = AppSession.NormalizeSeed(token);
+            if (normalized == null)
+            {
+                Error = $"Bootstrap node '{token}' must be an ip:port pair.";
+                return;
+            }
+            if (!seeds.Contains(normalized))
+                seeds.Add(normalized);
+        }
+
         IsBusy = true;
         try
         {
             var progress = new Progress<string>(s => BusyText = s);
-            await _session.LoginAsync(username, Passphrase, port, progress);
+            await _session.LoginAsync(username, Passphrase, port, seeds, progress);
+            GuiSettings.SaveBootstrapNodes(seeds.ToArray());
 
             if (!skipCacheSave && SaveCredentials)
             {

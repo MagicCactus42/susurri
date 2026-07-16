@@ -360,9 +360,9 @@ public class ShellViewModel : ViewModelBase, IDisposable
     {
         get
         {
-            var seeds = _session.Seeds();
+            var seeds = _session.ActiveSeeds;
             return seeds.Count == 0
-                ? "(none — set DHT__BootstrapNodes__0 before login)"
+                ? "(none — add a bootstrap node on the login screen)"
                 : string.Join(Environment.NewLine, seeds);
         }
     }
