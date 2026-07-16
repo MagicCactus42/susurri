@@ -2,7 +2,7 @@
 
 > *Most people don't appreciate anonymity before they lose it, and you only get to lose it once.*
 
-Decentralized, anonymous peer-to-peer messenger. Peers find each other through a Kademlia DHT and talk over Tor-style onion routes — no servers, no accounts, no phone numbers. One self-contained binary acts as the interactive client, a headless bootstrap seed, or both.
+Decentralized, anonymous peer-to-peer messenger. Peers find each other through a Kademlia DHT and talk over Tor-style onion routes — no servers, no accounts, no phone numbers. One self-contained binary acts as the interactive client, a headless bootstrap seed, or both; the same backend also ships as a desktop GUI (Windows · macOS · Linux) and an Android app — prebuilt packages come with every [release](../../releases).
 
 **Status: experimental, unaudited.** Known gaps are tracked honestly in [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).
 
@@ -147,7 +147,9 @@ All primitives via [NSec](https://nsec.rocks/) (libsodium). Constant-time compar
 
 ```
 src/Bootstrapper/Susurri.CLI/     cross-platform CLI + bootstrap seed mode
-src/Bootstrapper/Susurri.GUI/     desktop client (Avalonia) — same ChatService backend as the CLI
+src/Bootstrapper/Susurri.GUI.Core/  shared Avalonia UI (views, viewmodels) — same ChatService backend as the CLI
+src/Bootstrapper/Susurri.GUI/     desktop GUI head (Windows · macOS · Linux)
+src/Bootstrapper/Susurri.GUI.Android/  Android head — outside susurri.sln so a plain restore needs no android workload
 src/Bootstrapper/Susurri.Bootstrapper/  WPF demo (Windows only, legacy)
 src/Modules/DHT/                  Kademlia, onion routing, ratchet, NAT traversal, groups
 src/Modules/IAM/                  key derivation, encrypted key storage
