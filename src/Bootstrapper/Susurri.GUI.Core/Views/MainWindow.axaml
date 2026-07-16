@@ -8,8 +8,8 @@
         Width="1240" Height="760"
         MinWidth="1000" MinHeight="620"
         WindowStartupLocation="CenterScreen"
-        FontFamily="{StaticResource MonoFont}"
-        Background="{StaticResource GroundBrush}">
+        FontFamily="{DynamicResource MonoFont}"
+        Background="{DynamicResource GroundBrush}">
 
     <ContentControl Content="{Binding CurrentView}">
         <ContentControl.DataTemplates>

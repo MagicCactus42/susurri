@@ -5,31 +5,31 @@
              x:Class="Susurri.GUI.Views.ShellView"
              x:DataType="vm:ShellViewModel"
              x:Name="Root"
-             Background="{StaticResource GroundBrush}">
+             Background="{DynamicResource GroundBrush}">
 
     <UserControl.Styles>
         <Style Selector="TextBlock.peer">
-            <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
         </Style>
         <Style Selector="TextBlock.me">
-            <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
         </Style>
         <Style Selector="TextBlock.ev">
-            <Setter Property="Foreground" Value="{StaticResource AmberBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AmberBrush}" />
         </Style>
         <Style Selector="Border.msgrow">
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineSoftBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="16,7" />
         </Style>
         <Style Selector="Border.msgrow.ev">
-            <Setter Property="Background" Value="{StaticResource AmberFaintBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AmberFaintBrush}" />
         </Style>
     </UserControl.Styles>
 
     <DockPanel>
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource RailBrush}"
-                BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="14,5">
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource RailBrush}"
+                BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="14,5">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
                     <TextBlock Classes="ice" FontSize="11.5" Text="{Binding UserText}" />
@@ -47,8 +47,8 @@
 
         <Grid ColumnDefinitions="52,232,*,262">
 
-            <Border Grid.Column="0" Background="{StaticResource RailBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" Background="{DynamicResource RailBrush}"
+                    BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0">
                 <DockPanel Margin="0,12">
                     <StackPanel DockPanel.Dock="Bottom" Spacing="4" HorizontalAlignment="Center">
                         <Button Classes="rail" Content="⏻" Command="{Binding LogoutCommand}"
@@ -67,8 +67,8 @@
                 </DockPanel>
             </Border>
 
-            <Border Grid.Column="1" Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="1" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,1,0">
                 <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
                     <TextBlock Grid.Row="0" Classes="label" Text="GROUPS" Margin="16,14,16,6" />
                     <ListBox Grid.Row="1" ItemsSource="{Binding Groups}" MaxHeight="230"
@@ -129,7 +129,7 @@
             <Grid Grid.Column="2">
 
                 <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" IsVisible="{Binding IsChats}">
-                    <Border Grid.Row="0" BorderBrush="{StaticResource HairlineBrush}"
+                    <Border Grid.Row="0" BorderBrush="{DynamicResource HairlineBrush}"
                             BorderThickness="0,0,0,1" Padding="18,11" IsVisible="{Binding HasSelection}">
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel Grid.Column="0" Spacing="2">
@@ -162,7 +162,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="1" Background="{StaticResource AmberFaintBrush}"
+                    <Border Grid.Row="1" Background="{DynamicResource AmberFaintBrush}"
                             Padding="18,8" IsVisible="{Binding HasInviteCode}">
                         <Grid ColumnDefinitions="Auto,*,Auto">
                             <TextBlock Classes="amber" FontSize="11" Text="INVITE CODE"
@@ -216,7 +216,7 @@
                         </Grid>
                     </ScrollViewer>
 
-                    <Border Grid.Row="4" BorderBrush="{StaticResource HairlineBrush}"
+                    <Border Grid.Row="4" BorderBrush="{DynamicResource HairlineBrush}"
                             BorderThickness="0,1,0,0" Padding="18,10">
                         <Grid ColumnDefinitions="Auto,*,Auto">
                             <TextBlock Classes="ice" FontSize="12.5" VerticalAlignment="Center"
@@ -272,7 +272,7 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
-                        <Border Grid.Column="1" BorderBrush="{StaticResource HairlineBrush}"
+                        <Border Grid.Column="1" BorderBrush="{DynamicResource HairlineBrush}"
                                 BorderThickness="1,0,0,0" Padding="16,4,0,0"
                                 IsVisible="{Binding Contacts.HasSelection}">
                             <StackPanel Spacing="10">
@@ -311,8 +311,8 @@
                         <ItemsControl ItemsSource="{Binding Transfers.Items}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="svc:TransferModel">
-                                    <Border Background="{StaticResource PanelBrush}"
-                                            BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                                    <Border Background="{DynamicResource PanelBrush}"
+                                            BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
                                             Margin="0,0,0,10" Padding="14,10">
                                         <StackPanel Spacing="8">
                                             <Grid ColumnDefinitions="Auto,*,Auto,Auto">
@@ -391,8 +391,8 @@
                 </ScrollViewer>
             </Grid>
 
-            <Border Grid.Column="3" Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1,0,0,0">
+            <Border Grid.Column="3" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1,0,0,0">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="16,14" Spacing="4">
                         <TextBlock Classes="label" Text="CIRCUIT" Margin="0,0,0,6" />

@@ -2,111 +2,111 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Style Selector="TextBlock">
-        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
-        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
     </Style>
 
     <Style Selector="TextBlock.cond">
-        <Setter Property="FontFamily" Value="{StaticResource CondFont}" />
+        <Setter Property="FontFamily" Value="{DynamicResource CondFont}" />
     </Style>
 
     <Style Selector="TextBlock.label">
-        <Setter Property="FontFamily" Value="{StaticResource CondFont}" />
+        <Setter Property="FontFamily" Value="{DynamicResource CondFont}" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="LetterSpacing" Value="2.8" />
-        <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
     </Style>
 
     <Style Selector="TextBlock.dim">
-        <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
     </Style>
     <Style Selector="TextBlock.mut">
-        <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
     </Style>
     <Style Selector="TextBlock.ice">
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
     </Style>
     <Style Selector="TextBlock.ok">
-        <Setter Property="Foreground" Value="{StaticResource OkBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource OkBrush}" />
     </Style>
     <Style Selector="TextBlock.amber">
-        <Setter Property="Foreground" Value="{StaticResource AmberBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AmberBrush}" />
     </Style>
     <Style Selector="TextBlock.err">
-        <Setter Property="Foreground" Value="{StaticResource ErrBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ErrBrush}" />
     </Style>
 
     <Style Selector="TextBox">
-        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
-        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="2" />
-        <Setter Property="CaretBrush" Value="{StaticResource IceBrush}" />
-        <Setter Property="SelectionBrush" Value="{StaticResource IceFaintBrush}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource IceBrush}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource IceFaintBrush}" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="Padding" Value="9,7" />
     </Style>
     <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
-        <Setter Property="BorderBrush" Value="{StaticResource IceBrush}" />
-        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource IceBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
     </Style>
     <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
-        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
-        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
     </Style>
 
     <Style Selector="Button">
-        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
         <Setter Property="CornerRadius" Value="2" />
     </Style>
 
     <Style Selector="Button.ice">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource IceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource IceBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="14,6" />
     </Style>
     <Style Selector="Button.ice:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource IceFaintBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource IceBrush}" />
+        <Setter Property="Background" Value="{DynamicResource IceFaintBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource IceBrush}" />
     </Style>
     <Style Selector="Button.ice:disabled /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
     <Style Selector="Button.ghost">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="10,5" />
     </Style>
     <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource SelectionBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
     </Style>
 
     <Style Selector="Button.link">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="2" />
     </Style>
     <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
     </Style>
 
     <Style Selector="Button.rail">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Width" Value="38" />
         <Setter Property="Height" Value="38" />
@@ -116,15 +116,15 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.rail:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource SelectionBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
     </Style>
     <Style Selector="Button.rail.on">
-        <Setter Property="Background" Value="{StaticResource IceFaintBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+        <Setter Property="Background" Value="{DynamicResource IceFaintBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
     </Style>
     <Style Selector="Button.rail.on /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
     </Style>
 
     <Style Selector="ListBox">
@@ -137,31 +137,31 @@
         <Setter Property="CornerRadius" Value="0" />
     </Style>
     <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource SelectionBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
     </Style>
     <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{StaticResource HairlineSoftBrush}" />
+        <Setter Property="Background" Value="{DynamicResource HairlineSoftBrush}" />
     </Style>
 
     <Style Selector="ProgressBar">
-        <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
-        <Setter Property="Background" Value="{StaticResource HairlineBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
+        <Setter Property="Background" Value="{DynamicResource HairlineBrush}" />
         <Setter Property="MinHeight" Value="3" />
         <Setter Property="Height" Value="3" />
         <Setter Property="CornerRadius" Value="1" />
     </Style>
 
     <Style Selector="CheckBox">
-        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
-        <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
         <Setter Property="FontSize" Value="12" />
     </Style>
 
     <Style Selector="ComboBox">
-        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
-        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+        <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
         <Setter Property="CornerRadius" Value="2" />
     </Style>
 </Styles>

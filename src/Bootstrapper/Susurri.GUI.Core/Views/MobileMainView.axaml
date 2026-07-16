@@ -4,8 +4,8 @@
              xmlns:views="using:Susurri.GUI.Views"
              x:Class="Susurri.GUI.Views.MobileMainView"
              x:DataType="vm:MainViewModel"
-             FontFamily="{StaticResource MonoFont}"
-             Background="{StaticResource GroundBrush}">
+             FontFamily="{DynamicResource MonoFont}"
+             Background="{DynamicResource GroundBrush}">
 
     <ContentControl Content="{Binding CurrentView}">
         <ContentControl.DataTemplates>

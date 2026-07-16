@@ -5,29 +5,29 @@
              x:Class="Susurri.GUI.Views.MobileShellView"
              x:DataType="vm:ShellViewModel"
              x:Name="Root"
-             Background="{StaticResource GroundBrush}">
+             Background="{DynamicResource GroundBrush}">
 
     <UserControl.Styles>
         <Style Selector="TextBlock.peer">
-            <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
         </Style>
         <Style Selector="TextBlock.me">
-            <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
         </Style>
         <Style Selector="TextBlock.ev">
-            <Setter Property="Foreground" Value="{StaticResource AmberBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AmberBrush}" />
         </Style>
         <Style Selector="Border.msgrow">
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineSoftBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="14,8" />
         </Style>
         <Style Selector="Border.msgrow.ev">
-            <Setter Property="Background" Value="{StaticResource AmberFaintBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AmberFaintBrush}" />
         </Style>
         <Style Selector="Button.tab">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Height" Value="46" />
@@ -37,21 +37,21 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource SelectionBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource DimBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource DimBrush}" />
         </Style>
         <Style Selector="Button.tab.on">
-            <Setter Property="Background" Value="{StaticResource IceFaintBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+            <Setter Property="Background" Value="{DynamicResource IceFaintBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
         </Style>
         <Style Selector="Button.tab.on /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Foreground" Value="{StaticResource IceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource IceBrush}" />
         </Style>
     </UserControl.Styles>
 
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="{StaticResource RailBrush}"
-                BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="12,6">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource RailBrush}"
+                BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="12,6">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
                     <TextBlock Classes="ice" FontSize="11.5" Text="{Binding UserText}" />
@@ -65,8 +65,8 @@
             </Grid>
         </Border>
 
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource RailBrush}"
-                BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0"
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource RailBrush}"
+                BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0"
                 IsVisible="{Binding !IsConversationOpen}">
             <UniformGrid Columns="4">
                 <Button Classes="tab" Classes.on="{Binding IsChats}" Content="▤"
@@ -145,7 +145,7 @@
                 </DockPanel>
 
                 <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" IsVisible="{Binding HasSelection}">
-                    <Border Grid.Row="0" BorderBrush="{StaticResource HairlineBrush}"
+                    <Border Grid.Row="0" BorderBrush="{DynamicResource HairlineBrush}"
                             BorderThickness="0,0,0,1" Padding="6,6,14,6">
                         <Grid ColumnDefinitions="Auto,*">
                             <Button Classes="rail" Content="‹" Command="{Binding CloseConversationCommand}" />
@@ -164,7 +164,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="1" BorderBrush="{StaticResource HairlineSoftBrush}"
+                    <Border Grid.Row="1" BorderBrush="{DynamicResource HairlineSoftBrush}"
                             BorderThickness="0,0,0,1" Padding="14,7"
                             IsVisible="{Binding SelectedIsGroup}">
                         <StackPanel Spacing="6">
@@ -184,7 +184,7 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Grid.Row="2" Background="{StaticResource AmberFaintBrush}"
+                    <Border Grid.Row="2" Background="{DynamicResource AmberFaintBrush}"
                             Padding="14,8" IsVisible="{Binding HasInviteCode}">
                         <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
                             <TextBlock Classes="amber" FontSize="10.5" Text="INVITE CODE" />
@@ -231,7 +231,7 @@
                         </ItemsControl>
                     </ScrollViewer>
 
-                    <Border Grid.Row="5" BorderBrush="{StaticResource HairlineBrush}"
+                    <Border Grid.Row="5" BorderBrush="{DynamicResource HairlineBrush}"
                             BorderThickness="0,1,0,0" Padding="14,9">
                         <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                             <TextBlock Classes="ice" FontSize="12" VerticalAlignment="Center"
@@ -268,7 +268,7 @@
                                IsVisible="{Binding Contacts.HasStatus}"
                                Text="{Binding Contacts.Status}" />
                 </StackPanel>
-                <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource HairlineBrush}"
+                <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource HairlineBrush}"
                         BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,10,0,0"
                         IsVisible="{Binding Contacts.HasSelection}">
                     <StackPanel Spacing="8">
@@ -326,8 +326,8 @@
                     <ItemsControl ItemsSource="{Binding Transfers.Items}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="svc:TransferModel">
-                                <Border Background="{StaticResource PanelBrush}"
-                                        BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                                <Border Background="{DynamicResource PanelBrush}"
+                                        BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
                                         Margin="0,0,0,10" Padding="12,10">
                                     <StackPanel Spacing="8">
                                         <Grid ColumnDefinitions="Auto,*,Auto">

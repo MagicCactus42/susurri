@@ -2,11 +2,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="Susurri.GUI.App"
              RequestedThemeVariant="Dark">
-    <Application.Styles>
-        <FluentTheme />
-        <StyleInclude Source="avares://Susurri.GUI.Core/Styles/AppStyles.axaml" />
-    </Application.Styles>
-
     <Application.Resources>
         <ResourceDictionary>
             <Color x:Key="GroundColor">#0A0D12</Color>
@@ -45,4 +40,9 @@
             <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, Roboto Mono, Droid Sans Mono, monospace</FontFamily>
         </ResourceDictionary>
     </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Susurri.GUI.Core/Styles/AppStyles.axaml" />
+    </Application.Styles>
 </Application>
