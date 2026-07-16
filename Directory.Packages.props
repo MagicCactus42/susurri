@@ -37,6 +37,7 @@
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
 
     <PackageVersion Include="NSec.Cryptography" Version="25.4.0" />
+    <PackageVersion Include="libsodium" Version="1.0.20.2" />
     <PackageVersion Include="dotnetstandard-bip39" Version="1.0.2" />
 
     <PackageVersion Include="Scrutor" Version="6.1.0" />

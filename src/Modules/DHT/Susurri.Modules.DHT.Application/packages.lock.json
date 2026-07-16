@@ -2,11 +2,6 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
-      "libsodium": {
-        "type": "Transitive",
-        "resolved": "1.0.20.1",
-        "contentHash": "pkiceEqJDQFHjbga3k/oPfTVX9g+GKJZ1VrkuiLhaymt9YNw1Dr7cX9hNuZuNaWcr9WD0moW55k4pMwzQ7JaZQ=="
-      },
       "Microsoft.Extensions.Configuration": {
         "type": "Transitive",
         "resolved": "10.0.9",
@@ -226,6 +221,12 @@
           "Scrutor": "[6.1.0, )",
           "Susurri.Shared.Abstractions": "[1.0.0, )"
         }
+      },
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
       },
       "Microsoft.Extensions.Configuration.EnvironmentVariables": {
         "type": "CentralTransitive",
