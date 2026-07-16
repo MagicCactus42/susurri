@@ -5,7 +5,8 @@
              x:Class="Susurri.GUI.Views.MobileMainView"
              x:DataType="vm:MainViewModel"
              FontFamily="{DynamicResource MonoFont}"
-             Background="{DynamicResource GroundBrush}">
+             Background="{DynamicResource GroundBrush}"
+             TopLevel.AutoSafeAreaPadding="False">
 
     <ContentControl Content="{Binding CurrentView}">
         <ContentControl.DataTemplates>
