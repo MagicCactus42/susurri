@@ -29,6 +29,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
     private readonly bool _useStun;
     private readonly uint _networkId;
     private readonly ConcurrentDictionary<KademliaId, IPEndPoint> _punchedEndpoints = new();
+    private readonly ConcurrentDictionary<string, IPEndPoint> _relays = new();
     private bool _disposed;
 
     private TcpListener? _listener;
@@ -135,6 +136,7 @@ public sealed class KademliaDhtNode : IAsyncDisposable
             // may be 0 for ephemeral) so a peer that knows our listening port can
             // reach us on the same number over either transport.
             _udp.Start(LocalPort);
+            _udp.LocalNodeId = LocalId.Bytes.ToArray();
             _udp.OnMessage += HandleUdpMessageAsync;
 
             if (_useStun)
@@ -253,6 +255,11 @@ public sealed class KademliaDhtNode : IAsyncDisposable
                     var node = new KademliaNode(pong.SenderId, pong.SenderPublicKey, endpoint);
                     _routingTable.TryAddNode(node);
                     _logger.LogInformation("Connected to bootstrap node {NodeId}", pong.SenderId.ToString()[..16]);
+
+                    // Register with this public node as a relay so peers behind the
+                    // same-restrictive NAT can reach us through it when direct and
+                    // hole-punched paths both fail.
+                    RegisterWithRelay(endpoint);
 
                     await FindNodeAsync(LocalId).ConfigureAwait(false);
                 }
@@ -451,18 +458,72 @@ public sealed class KademliaDhtNode : IAsyncDisposable
         if (direct != null)
             return direct;
 
-        if (_udp == null || PublicUdpEndPoint == null)
+        if (_udp == null)
             return null;
 
-        var intermediary = PickIntermediary(node.Id);
-        if (intermediary == null)
+        // Try a coordinated hole punch (needs our public endpoint to advertise).
+        if (PublicUdpEndPoint != null)
+        {
+            var intermediary = PickIntermediary(node.Id);
+            if (intermediary != null)
+            {
+                var endpoint = await HolePunchThroughAsync(intermediary, node.Id).ConfigureAwait(false);
+                if (endpoint != null)
+                {
+                    var viaPunch = await SendRequestOverUdpAsync(endpoint, request).ConfigureAwait(false);
+                    if (viaPunch != null)
+                        return viaPunch;
+                }
+            }
+        }
+
+        // Last resort — both are unreachable directly and hole punch failed
+        // (e.g. symmetric NAT on both sides). Route through a shared relay both
+        // peers are registered with.
+        return await SendRequestViaRelaysAsync(node.Id, request).ConfigureAwait(false);
+    }
+
+    private void RegisterWithRelay(IPEndPoint relay)
+    {
+        if (_udp == null)
+            return;
+        if (!_relays.TryAdd(relay.ToString(), relay))
+            return;
+
+        var ct = _cts?.Token ?? CancellationToken.None;
+        _backgroundTasks.Run(
+            () => _udp.RegisterWithRelayAsync(relay, LocalId.Bytes.ToArray(), ct),
+            $"relay registration {relay}");
+    }
+
+    private async Task<KademliaMessage?> SendRequestViaRelaysAsync(KademliaId targetId, KademliaMessage request)
+    {
+        if (_udp == null)
             return null;
 
-        var endpoint = await HolePunchThroughAsync(intermediary, node.Id).ConfigureAwait(false);
-        if (endpoint == null)
-            return null;
+        foreach (var relay in _relays.Values)
+        {
+            var tcs = new TaskCompletionSource<KademliaMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingRequests[request.MessageId] = tcs;
+            try
+            {
+                StampOutgoing(request);
+                var acked = await _udp.SendReliableViaRelayAsync(relay, targetId.Bytes.ToArray(), request.Serialize()).ConfigureAwait(false);
+                if (acked)
+                    return await tcs.Task.WaitAsync(RequestTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException) { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Relay send via {Relay} failed", relay);
+            }
+            finally
+            {
+                _pendingRequests.TryRemove(request.MessageId, out _);
+            }
+        }
 
-        return await SendRequestOverUdpAsync(endpoint, request).ConfigureAwait(false);
+        return null;
     }
 
     private KademliaNode? PickIntermediary(KademliaId targetId)

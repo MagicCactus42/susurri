@@ -139,6 +139,53 @@ public class UdpEndpointTests
             async () => await a.SendReliableAsync(LoopbackOf(a), tooBig));
     }
 
+    private static byte[] NodeId(byte seed)
+    {
+        var id = new byte[32];
+        Array.Fill(id, seed);
+        return id;
+    }
+
+    [Fact]
+    public async Task Relay_Forwards_Reliable_Message_Between_Registered_Peers()
+    {
+        await using var relay = Start();
+        await using var a = Start();
+        await using var b = Start();
+        a.LocalNodeId = NodeId(0xAA);
+        b.LocalNodeId = NodeId(0xBB);
+
+        var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        b.OnMessage += (_, data) => { received.TrySetResult(data); return Task.CompletedTask; };
+
+        using var reg = new CancellationTokenSource();
+        _ = a.RegisterWithRelayAsync(LoopbackOf(relay), a.LocalNodeId!, reg.Token);
+        _ = b.RegisterWithRelayAsync(LoopbackOf(relay), b.LocalNodeId!, reg.Token);
+        await Task.Delay(300); // let registrations land at the relay
+
+        var payload = new byte[3000]; // multi-fragment, to exercise reassembly over relay
+        new Random(5).NextBytes(payload);
+
+        var acked = await a.SendReliableViaRelayAsync(LoopbackOf(relay), b.LocalNodeId!, payload);
+
+        acked.ShouldBeTrue();
+        var got = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        got.ShouldBe(payload);
+
+        reg.Cancel();
+    }
+
+    [Fact]
+    public async Task Relay_Send_To_Unregistered_Peer_Is_Not_Acked()
+    {
+        await using var relay = Start();
+        await using var a = Start();
+        a.LocalNodeId = NodeId(0x01);
+
+        var acked = await a.SendReliableViaRelayAsync(LoopbackOf(relay), NodeId(0x99), Array.Empty<byte>());
+        acked.ShouldBeFalse();
+    }
+
     [Fact]
     public async Task MalformedDatagram_Is_Ignored_No_Delivery()
     {

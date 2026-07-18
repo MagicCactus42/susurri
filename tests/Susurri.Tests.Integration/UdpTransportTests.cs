@@ -151,6 +151,42 @@ public class UdpTransportTests
         b.KnownNodes.ShouldBeGreaterThanOrEqualTo(1);
     }
 
+    [Fact]
+    public async Task Relay_Fallback_Reaches_Peer_When_Direct_And_Punch_Fail()
+    {
+        // relay is a plain public node; A and B (no STUN, so no hole-punch) both
+        // register with it and reach each other only through it.
+        await using var relay = MakeUdpNode(out _);
+        await using var a = MakeUdpNode(out _);
+        await using var b = MakeUdpNode(out _);
+
+        await relay.StartAsync(0);
+        await a.StartAsync(0);
+        await b.StartAsync(0);
+
+        var relayEp = new IPEndPoint(IPAddress.Loopback, relay.LocalPort);
+        await a.BootstrapAsync(new[] { relayEp });
+        await b.BootstrapAsync(new[] { relayEp });
+        await Task.Delay(500); // let relay registrations land
+
+        // A holds a dead direct endpoint for B; no public endpoint => punch skipped.
+        var unreachableB = new KademliaNode(
+            b.LocalId, b.EncryptionPublicKey, new IPEndPoint(IPAddress.Loopback, 1));
+
+        var request = new Susurri.Modules.DHT.Core.Kademlia.Protocol.FindNodeMessage
+        {
+            SenderId = a.LocalId,
+            SenderPublicKey = a.EncryptionPublicKey,
+            TargetId = a.LocalId
+        };
+
+        var response = await a.SendRequestToNodeAsync(unreachableB, request)
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        response.ShouldNotBeNull();
+        response.SenderId.ShouldBe(b.LocalId);
+    }
+
     private static void SeedPublicEndpoint(KademliaDhtNode node) =>
         node.SetPublicUdpEndpoint(new IPEndPoint(IPAddress.Loopback, node.LocalPort));
 

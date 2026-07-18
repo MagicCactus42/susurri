@@ -12,6 +12,11 @@ public sealed class UdpEndpoint : IAsyncDisposable
     private const int MaxFragmentPayload = 1024;
     private static readonly byte[] ReliableMagic = { 0x53, 0x55, 0x52, 0x4D }; // "SURM"
     private static readonly byte[] ProbeMagic = { 0x53, 0x55, 0x48, 0x50 };    // "SUHP"
+    private static readonly byte[] RelayRegisterMagic = { 0x53, 0x55, 0x52, 0x47 }; // "SURG"
+    private static readonly byte[] RelayForwardMagic = { 0x53, 0x55, 0x52, 0x46 };  // "SURF"
+    private static readonly byte[] RelayDeliverMagic = { 0x53, 0x55, 0x52, 0x44 };  // "SURD"
+    private const int NodeIdSize = 32;
+    private static readonly TimeSpan RegistrationTtl = TimeSpan.FromSeconds(90);
     private const byte FrameData = 0x01;
     private const byte FrameAck = 0x02;
     private const int ProbePacketSize = 20;
@@ -35,8 +40,17 @@ public sealed class UdpEndpoint : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<IPEndPoint>> _punchSessions = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<IPEndPoint>> _stunPending = new();
 
+    // Relay-server role: registered peers (nodeId -> their public endpoint).
+    private readonly ConcurrentDictionary<string, (IPEndPoint Endpoint, DateTimeOffset Expiry)> _registrations = new();
+    // Relay-client role: a synthetic endpoint per relayed peer, so the reliable
+    // layer treats each as a distinct peer; the route says how to reach it.
+    private readonly ConcurrentDictionary<string, IPEndPoint> _relayedByNode = new();
+    private readonly ConcurrentDictionary<IPEndPoint, (IPEndPoint Relay, byte[] TargetNodeId)> _relayRoutes = new();
+    private int _syntheticCounter;
+
     public IPEndPoint? LocalEndPoint { get; private set; }
     public int LocalPort { get; private set; }
+    public byte[]? LocalNodeId { get; set; }
     public bool IsRunning => _client != null && _cts is { IsCancellationRequested: false };
 
     public event Func<IPEndPoint, byte[], Task>? OnMessage;
@@ -236,7 +250,73 @@ public sealed class UdpEndpoint : IAsyncDisposable
     private async Task SendDatagramAsync(IPEndPoint destination, byte[] datagram)
     {
         if (_client == null) return;
+
+        // A synthetic destination means the peer is only reachable through a
+        // relay: wrap the datagram so the relay forwards it to that peer.
+        if (_relayRoutes.TryGetValue(destination, out var route) && LocalNodeId != null)
+        {
+            var wrapped = BuildRelayForward(route.TargetNodeId, LocalNodeId, datagram);
+            await _client.SendAsync(wrapped, wrapped.Length, route.Relay).ConfigureAwait(false);
+            return;
+        }
+
         await _client.SendAsync(datagram, datagram.Length, destination).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Registers this node with a relay (and keeps the mapping alive) so peers
+    /// that can't reach it directly — e.g. both sides behind symmetric NAT — can
+    /// deliver to it through the relay. Runs until cancelled.
+    /// </summary>
+    public async Task RegisterWithRelayAsync(IPEndPoint relay, byte[] nodeId, CancellationToken ct = default)
+    {
+        var packet = new byte[4 + NodeIdSize];
+        RelayRegisterMagic.CopyTo(packet, 0);
+        nodeId.AsSpan(0, NodeIdSize).CopyTo(packet.AsSpan(4));
+
+        while (!ct.IsCancellationRequested)
+        {
+            try { await SendDatagramAsync(relay, packet).ConfigureAwait(false); }
+            catch { }
+            try { await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    /// <summary>
+    /// Sends a reliable payload to a peer via a relay, addressed by node id. The
+    /// relay forwards it and forwards the peer's acks/replies back, so the normal
+    /// reliability and request/response flow works over the relayed path.
+    /// </summary>
+    public Task<bool> SendReliableViaRelayAsync(IPEndPoint relay, byte[] targetNodeId, byte[] payload, CancellationToken ct = default)
+    {
+        var synthetic = SyntheticFor(targetNodeId, relay);
+        return SendReliableAsync(synthetic, payload, ct);
+    }
+
+    private IPEndPoint SyntheticFor(byte[] nodeId, IPEndPoint relay)
+    {
+        var key = Convert.ToHexString(nodeId.AsSpan(0, NodeIdSize));
+        var synthetic = _relayedByNode.GetOrAdd(key, _ =>
+        {
+            var n = System.Threading.Interlocked.Increment(ref _syntheticCounter);
+            // 240.0.0.0/4 is reserved and never routed — a stable, collision-free
+            // dictionary key that is never actually sent to.
+            var addr = new IPAddress(new byte[] { 240, (byte)(n >> 16), (byte)(n >> 8), (byte)n });
+            return new IPEndPoint(addr, 1);
+        });
+        _relayRoutes[synthetic] = (relay, nodeId.AsSpan(0, NodeIdSize).ToArray());
+        return synthetic;
+    }
+
+    private static byte[] BuildRelayForward(byte[] targetNodeId, byte[] originNodeId, byte[] inner)
+    {
+        var packet = new byte[4 + NodeIdSize + NodeIdSize + inner.Length];
+        RelayForwardMagic.CopyTo(packet, 0);
+        targetNodeId.AsSpan(0, NodeIdSize).CopyTo(packet.AsSpan(4));
+        originNodeId.AsSpan(0, NodeIdSize).CopyTo(packet.AsSpan(4 + NodeIdSize));
+        inner.CopyTo(packet.AsSpan(4 + 2 * NodeIdSize));
+        return packet;
     }
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
@@ -277,11 +357,68 @@ public sealed class UdpEndpoint : IAsyncDisposable
             return;
         }
 
+        if (data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(RelayRegisterMagic))
+        {
+            HandleRelayRegister(sender, data);
+            return;
+        }
+
+        if (data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(RelayForwardMagic))
+        {
+            await HandleRelayForwardAsync(data).ConfigureAwait(false);
+            return;
+        }
+
+        if (data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(RelayDeliverMagic))
+        {
+            await HandleRelayDeliverAsync(sender, data).ConfigureAwait(false);
+            return;
+        }
+
         if (data.Length >= 20 && BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(4, 4)) == StunMagicCookie)
         {
             HandleStunResponse(data);
             return;
         }
+    }
+
+    private void HandleRelayRegister(IPEndPoint sender, byte[] data)
+    {
+        if (data.Length != 4 + NodeIdSize)
+            return;
+        var nodeIdHex = Convert.ToHexString(data.AsSpan(4, NodeIdSize));
+        _registrations[nodeIdHex] = (sender, DateTimeOffset.UtcNow.Add(RegistrationTtl));
+    }
+
+    private async Task HandleRelayForwardAsync(byte[] data)
+    {
+        if (data.Length < 4 + 2 * NodeIdSize)
+            return;
+        var targetHex = Convert.ToHexString(data.AsSpan(4, NodeIdSize));
+        var origin = data.AsSpan(4 + NodeIdSize, NodeIdSize).ToArray();
+        var inner = data.AsSpan(4 + 2 * NodeIdSize).ToArray();
+
+        if (!_registrations.TryGetValue(targetHex, out var reg) || reg.Expiry < DateTimeOffset.UtcNow)
+            return;
+
+        var deliver = new byte[4 + NodeIdSize + inner.Length];
+        RelayDeliverMagic.CopyTo(deliver, 0);
+        origin.CopyTo(deliver.AsSpan(4));
+        inner.CopyTo(deliver.AsSpan(4 + NodeIdSize));
+        await SendDatagramAsync(reg.Endpoint, deliver).ConfigureAwait(false);
+    }
+
+    private async Task HandleRelayDeliverAsync(IPEndPoint relay, byte[] data)
+    {
+        if (data.Length < 4 + NodeIdSize)
+            return;
+        var origin = data.AsSpan(4, NodeIdSize).ToArray();
+        var inner = data.AsSpan(4 + NodeIdSize).ToArray();
+
+        // Attribute the inner datagram to a synthetic endpoint for this origin so
+        // reassembly and any ack/reply route back through the same relay.
+        var synthetic = SyntheticFor(origin, relay);
+        await DispatchDatagramAsync(synthetic, inner).ConfigureAwait(false);
     }
 
     private void HandleProbe(IPEndPoint sender, byte[] data)
@@ -441,6 +578,9 @@ public sealed class UdpEndpoint : IAsyncDisposable
             foreach (var kvp in _inbound)
                 if (now - kvp.Value.StartedAt > ReassemblyTimeout)
                     _inbound.TryRemove(kvp.Key, out _);
+            foreach (var kvp in _registrations)
+                if (kvp.Value.Expiry < now)
+                    _registrations.TryRemove(kvp.Key, out _);
         }
     }
 
