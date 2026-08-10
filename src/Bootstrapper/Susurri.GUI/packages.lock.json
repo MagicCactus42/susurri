@@ -443,7 +443,7 @@
         "dependencies": {
           "Avalonia": "[11.3.19, )",
           "Avalonia.Fonts.Inter": "[11.3.19, )",
-          "Avalonia.Themes.Fluent": "[11.2.3, )",
+          "Avalonia.Themes.Fluent": "[11.3.19, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.9, )",
           "Susurri.Modules.DHT.Core": "[1.0.0, )",
           "Susurri.Modules.IAM.Application": "[1.0.0, )",
@@ -500,11 +500,11 @@
       },
       "Avalonia.Themes.Fluent": {
         "type": "CentralTransitive",
-        "requested": "[11.2.3, )",
-        "resolved": "11.2.3",
-        "contentHash": "gPJWBWaeocvRhSrB977xsfH0Ame14PxRMIgEfezi2bTjNJ43JWzJtALgDfDZYMpZPDdeWU/mwDigR/kD+rJtlw==",
+        "requested": "[11.3.19, )",
+        "resolved": "11.3.19",
+        "contentHash": "GGH8RtXAfgVovnWh6ar8bCGkoL0s3jkOT3HhTKYSz+cKXn0gFApUl9fj1OQfy2tA+xerkl79k+7z+ajNijj3ew==",
         "dependencies": {
-          "Avalonia": "11.2.3"
+          "Avalonia": "11.3.19"
         }
       },
       "dotnetstandard-bip39": {
