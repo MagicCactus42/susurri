@@ -461,7 +461,7 @@
         "dependencies": {
           "Microsoft.EntityFrameworkCore": "[9.0.19, )",
           "Microsoft.EntityFrameworkCore.Abstractions": "[9.0.19, )",
-          "Microsoft.EntityFrameworkCore.Relational": "[9.0.17, )",
+          "Microsoft.EntityFrameworkCore.Relational": "[9.0.19, )",
           "NSec.Cryptography": "[25.4.0, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[9.0.4, )",
           "Susurri.Shared.Infrastructure": "[1.0.0, )",
@@ -515,14 +515,14 @@
       },
       "Microsoft.EntityFrameworkCore.Relational": {
         "type": "CentralTransitive",
-        "requested": "[9.0.17, )",
-        "resolved": "9.0.17",
-        "contentHash": "oOsu2/68Xed8YlSwoRJPuQJjPCgChLeZ9XmWI8dQRyqC/CxILirQo3hpub+hQDJ9f9z2u0d8DqvzR86TOnfdkg==",
+        "requested": "[9.0.19, )",
+        "resolved": "9.0.19",
+        "contentHash": "KAfYGG4LWRNn1G/vMRydxgOjuZoWUvdd5raUcIia/HPg1jUjlQzS386nUx5gt3YfKxpFJaCGxdsQ1nCZWuYR8A==",
         "dependencies": {
-          "Microsoft.EntityFrameworkCore": "9.0.17",
-          "Microsoft.Extensions.Caching.Memory": "9.0.17",
-          "Microsoft.Extensions.Configuration.Abstractions": "9.0.17",
-          "Microsoft.Extensions.Logging": "9.0.17"
+          "Microsoft.EntityFrameworkCore": "9.0.19",
+          "Microsoft.Extensions.Caching.Memory": "9.0.19",
+          "Microsoft.Extensions.Configuration.Abstractions": "9.0.19",
+          "Microsoft.Extensions.Logging": "9.0.19"
         }
       },
       "Microsoft.Extensions.Configuration.EnvironmentVariables": {
