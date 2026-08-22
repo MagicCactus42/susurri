@@ -14,6 +14,12 @@
             For production, prefer the env var: ConnectionStrings__UsersDb=...
         -->
         <UserSecretsId>susurri-cli-2026-04-25</UserSecretsId>
+        <!--
+            All RIDs this head is published for. Keeps the RID graph in the lock file
+            so CI can restore in locked mode and publish with -r plus no-restore.
+            See the note in Directory.Build.props — libraries must not declare RIDs.
+        -->
+        <RuntimeIdentifiers>linux-x64;win-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
     </PropertyGroup>
 
     <ItemGroup>
