@@ -59,10 +59,10 @@ jobs:
           dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
 
       - name: publish gui
-        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r win-x64 --self-contained -o staging /p:RestoreLockedMode=false /p:Version=${{ needs.version.outputs.version }}
+        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r win-x64 --self-contained -o staging /p:Version=${{ needs.version.outputs.version }}
 
       - name: publish cli into the same install
-        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r win-x64 --self-contained -o staging /p:RestoreLockedMode=false /p:Version=${{ needs.version.outputs.version }}
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r win-x64 --self-contained -o staging /p:Version=${{ needs.version.outputs.version }}
 
       - name: install velopack cli
         run: dotnet tool install -g vpk
@@ -112,10 +112,10 @@ jobs:
           dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
 
       - name: publish gui
-        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r linux-x64 --self-contained -o staging /p:RestoreLockedMode=false /p:Version=$VERSION
+        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r linux-x64 --self-contained -o staging /p:Version=$VERSION
 
       - name: publish cli
-        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r linux-x64 --self-contained -o staging-cli /p:RestoreLockedMode=false /p:Version=$VERSION
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r linux-x64 --self-contained -o staging-cli /p:Version=$VERSION
 
       # the cli rides inside the appimage install too, same as on windows
       - name: merge cli into gui staging
@@ -179,10 +179,10 @@ jobs:
           dotnet restore src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj
 
       - name: publish gui
-        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r osx-$ARCH --self-contained -o staging /p:RestoreLockedMode=false /p:Version=$VERSION
+        run: dotnet publish src/Bootstrapper/Susurri.GUI/Susurri.GUI.csproj -c Release -r osx-$ARCH --self-contained -o staging /p:Version=$VERSION
 
       - name: publish cli
-        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r osx-$ARCH --self-contained -o staging-cli /p:RestoreLockedMode=false /p:Version=$VERSION
+        run: dotnet publish src/Bootstrapper/Susurri.CLI/Susurri.CLI.csproj -c Release -r osx-$ARCH --self-contained -o staging-cli /p:Version=$VERSION
 
       # the cli lands in Susurri.app/Contents/MacOS next to the gui, runnable from a terminal
       - name: merge cli into gui staging

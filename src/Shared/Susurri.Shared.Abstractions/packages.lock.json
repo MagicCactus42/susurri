@@ -31,6 +31,38 @@
         "resolved": "1.0.20.2",
         "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
       }
+    },
+    "net10.0/linux-x64": {
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
+      }
+    },
+    "net10.0/osx-arm64": {
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
+      }
+    },
+    "net10.0/osx-x64": {
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
+      }
+    },
+    "net10.0/win-x64": {
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
+      }
     }
   }
 }
