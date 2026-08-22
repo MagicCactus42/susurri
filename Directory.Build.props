@@ -28,5 +28,13 @@
   <PropertyGroup>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+    <!--
+      Every RID we publish for must be in the lock files, because `dotnet publish -r`
+      flows the RID into every project in the graph and locked mode rejects a RID
+      the lock file was not evaluated for (NU1004). Without this list the deploy and
+      release jobs had to publish with RestoreLockedMode=false, bypassing the audited
+      dependency graph. Susurri.GUI.Android overrides this with the android RIDs.
+    -->
+    <RuntimeIdentifiers>linux-x64;win-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
   </PropertyGroup>
 </Project>
