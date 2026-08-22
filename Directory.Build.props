@@ -33,8 +33,11 @@
       flows the RID into every project in the graph and locked mode rejects a RID
       the lock file was not evaluated for (NU1004). Without this list the deploy and
       release jobs had to publish with RestoreLockedMode=false, bypassing the audited
-      dependency graph. Susurri.GUI.Android overrides this with the android RIDs.
+      dependency graph. The android RIDs must be here too: once a library declares
+      RuntimeIdentifiers, the android head pushes its RID into it at build time and
+      the assets file must have that target (NETSDK1047). Susurri.GUI.Android itself
+      overrides this with the android-only list.
     -->
-    <RuntimeIdentifiers>linux-x64;win-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifiers>linux-x64;win-x64;osx-x64;osx-arm64;android-arm64;android-x64</RuntimeIdentifiers>
   </PropertyGroup>
 </Project>

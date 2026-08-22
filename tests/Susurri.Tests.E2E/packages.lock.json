@@ -499,6 +499,48 @@
         }
       }
     },
+    "net10.0/android-arm64": {
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "uaFRda9NjtbJRkdx311eXlAA3n2em7223c1A8d1VWyl+4FL9vkG7y2lpPfBU9HYdj/9KgdRNdn1vFK8ZYCYT/A=="
+      },
+      "System.Management": {
+        "type": "Transitive",
+        "resolved": "6.0.1",
+        "contentHash": "10J1D0h/lioojphfJ4Fuh5ZUThT/xOVHdV9roGBittKKNP2PMjrvibEdbVTGZcPra1399Ja3tqIJLyQrc5Wmhg==",
+        "dependencies": {
+          "System.CodeDom": "6.0.0"
+        }
+      },
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
+      }
+    },
+    "net10.0/android-x64": {
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "uaFRda9NjtbJRkdx311eXlAA3n2em7223c1A8d1VWyl+4FL9vkG7y2lpPfBU9HYdj/9KgdRNdn1vFK8ZYCYT/A=="
+      },
+      "System.Management": {
+        "type": "Transitive",
+        "resolved": "6.0.1",
+        "contentHash": "10J1D0h/lioojphfJ4Fuh5ZUThT/xOVHdV9roGBittKKNP2PMjrvibEdbVTGZcPra1399Ja3tqIJLyQrc5Wmhg==",
+        "dependencies": {
+          "System.CodeDom": "6.0.0"
+        }
+      },
+      "libsodium": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.20.2, )",
+        "resolved": "1.0.20.2",
+        "contentHash": "FButtPK6HZvOewaE20F1HXNJn4qOoGAf7FEDm0VbWJ+xBX9pN9+2nkQQnfaLz+Ae5KuEzRoe1GHO00UpabgNxA=="
+      }
+    },
     "net10.0/linux-x64": {
       "System.Diagnostics.EventLog": {
         "type": "Transitive",
