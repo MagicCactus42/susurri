@@ -1,137 +1,104 @@
 # Bug & Hardening Roadmap
 
-> **INTERNAL / SENSITIVE — do not publish while HIGH items are open.**
-> This file enumerates unpatched vulnerabilities with exact file:line locations
-> and exploitation notes. The repository is public; keep this out of git (or in a
-> private tracker) until at least the HIGH items below are fixed, then it can be
-> folded into `KNOWN-LIMITATIONS.md` / issues.
+> **INTERNAL / SENSITIVE.** This file enumerates unpatched weaknesses with exact
+> file:line locations and exploitation notes. Both original HIGH items are now
+> fixed (BUG-H2 partially — see the residual below); the remaining open items are
+> lower-severity residuals. Once BUG-H2's residual is closed this can be folded
+> into `KNOWN-LIMITATIONS.md` / issues.
 
-Findings from the 2026-07-11 maturity audit, ranked highest → lowest severity.
-
-**Legend**
-- **Verified ✅** — read directly in the current source during the audit.
-- **Reported ⚠️** — surfaced by an audit pass with file:line evidence; not independently re-read.
-
-Template per item: what / where / impact / fix.
+Findings from the 2026-07-11 maturity audit, re-verified against source on
+**2026-08-22**. Fixed items are collapsed to one-liners with the enforcing code;
+open items keep the full template (what / where / impact / fix).
 
 ---
 
-## CRITICAL / HIGH
+## STILL OPEN
 
-### BUG-H1 — DHT node IDs are not bound to their public key (eclipse / Sybil enabler)
-- **Verified ✅**
-- **Where:** `src/Modules/DHT/Susurri.Modules.DHT.Core/Kademlia/KademliaDhtNode.cs:199` (UDP insert), `:255` (bootstrap PONG insert), `:607` (TCP insert). ID/key helper: `KademliaId.FromPublicKey` = `SHA256(pubkey)` (`Kademlia/KademliaId.cs:44`); the node computes its own ID this way at `:76`.
-- **What:** peers are inserted into the routing table using the attacker-supplied `message.SenderId` / `pong.SenderId` verbatim. There is no check that `SenderId == KademliaId.FromPublicKey(SenderPublicKey)`. The TCP path (`:603-608`) gates on `SenderPort > 0 && SenderPublicKey.Length > 0` but never validates the ID against the key.
-- **Impact:** an attacker can claim **any** node ID independent of their key and position themselves arbitrarily close to a victim's key/username hash, intercepting that victim's `FIND_VALUE` / `STORE` / offline-message routing — a targeted eclipse attack. Undermines the "genuinely decentralized" guarantee for any targeted user.
-- **Fix:** at every insertion site, reject (or recompute) the entry unless `node.SenderId == KademliaId.FromPublicKey(node.SenderPublicKey)`. Centralize the check in `RoutingTable.TryAddNode` or a single validated-construction path so all three sites are covered.
+### BUG-H2 (residual) — UDP relay registration and delivery origin are unauthenticated
+- **Fixed since the audit:** per-IP rate limiting now guards all three relay frames
+  before handling (`Network/UdpEndpoint.cs` `DispatchDatagramAsync`, via
+  `RateLimiter` keyed on source address), and `_registrations` is capped at
+  `MaxRegistrations = 4096` with expired/oldest eviction.
+- **Still open:** `HandleRelayRegister` accepts a bare `4 + 32`-byte frame with no
+  signature — nothing proves the sender owns the nodeId it registers (only
+  first-come TTL squatting protection). `HandleRelayDeliverAsync` still trusts the
+  datagram-supplied `origin` nodeId and synthesizes a peer endpoint from it.
+- **Impact:** an attacker can still race a victim's registration to black-hole or
+  redirect the victim's relayed inbound, and spoof delivery origins. Reflection
+  and memory-exhaustion angles are closed.
+- **Fix:** require the registrant to sign the registration payload with the
+  identity key and verify against `KademliaId.FromPublicKey`; authenticate or stop
+  trusting the `origin` field on deliver. Builds on the (now enforced) key↔ID
+  binding from BUG-H1.
 
-### BUG-H2 — UDP relay frames are unauthenticated and unrate-limited (open reflector + registration hijack + unbounded memory)
-- **Verified ✅**
-- **Where:** `src/Modules/DHT/Susurri.Modules.DHT.Core/Network/UdpEndpoint.cs` — `DispatchDatagramAsync:346` (dispatches `SURG/SURF/SURD` **before** any rate limiter; the limiter only guards `HandleUdpMessageAsync`, which relay frames never reach), `HandleRelayRegister:385`, `HandleRelayForwardAsync:393`, `HandleRelayDeliverAsync:411`, `_registrations` dictionary `:44` (no size cap, 90 s TTL only).
-- **What:** three unauthenticated primitives on the shared UDP socket:
-  1. **Registration hijack** — `HandleRelayRegister` stores `nodeId → sender` with no proof the sender owns that nodeId and no cap on `_registrations`. An attacker registers a victim's nodeId to black-hole/redirect the victim's relayed inbound, or floods registrations to exhaust memory.
-  2. **Open reflector** — `HandleRelayForwardAsync` forwards arbitrary inner payloads to any registered target with no auth and no rate limit; the relay becomes a source-hiding UDP reflector aimed at a chosen victim, abusing relay bandwidth.
-  3. **Spoofable origin** — `HandleRelayDeliverAsync` trusts the `origin` nodeId from the datagram and synthesizes a peer endpoint from it.
-- **Impact:** DoS amplification/reflection off any relay node, targeted denial of a peer's relay path, and memory exhaustion of a relay. Introduced with the recent symmetric-NAT relay-fallback feature.
-- **Fix:** (a) rate-limit `DispatchDatagramAsync` per source IP (reuse the existing per-IP limiter); (b) require the registrant to prove nodeId ownership (sign the registration payload with the identity key, verify against `FromPublicKey`); (c) cap `_registrations` (bounded dictionary with LRU/oldest-eviction). Ties into BUG-H1's key↔ID binding.
+### BUG-M2 (residual) — no liveness check on k-bucket insert; eviction path is dead code
+- **Fixed since the audit:** per-IP-prefix diversity cap inside buckets
+  (`Kademlia/KBucket.cs` `ExceedsPrefixDiversityLocked`, /24 for v4 and /48 for
+  v6, `SecurityLimits.MaxBucketNodesPerPrefix = 6`).
+- **Still open:** `KBucket.TryAdd` inserts without a pre-insertion PING, the
+  `BucketFull` result is never acted on — all `TryAddNode` call sites discard the
+  `AddNodeResult`, so `GetOldestNodeInBucket` / `ReplaceOldestInBucket`
+  (`Kademlia/RoutingTable.cs`) have no callers.
+- **Impact:** routing-table poisoning is costlier than at audit time (ID↔key
+  binding + prefix caps) but still lacks the classic Kademlia liveness defense.
+- **Fix:** on a full bucket, PING the oldest node and only replace it on timeout;
+  wire up the existing eviction helpers. Consider a modest PoW on node IDs.
 
----
-
-## MEDIUM
-
-### BUG-M1 — onion path selection and mixing delay use non-cryptographic `Random.Shared`
-- **Verified ✅**
-- **Where:** path selection `src/Modules/DHT/Susurri.Modules.DHT.Core/Kademlia/RoutingTable.cs:115,117` (`GetRandomNode`) and `:128` (`GetRandomNodes` Fisher–Yates); mixing delay `src/Modules/DHT/Susurri.Modules.DHT.Core/Onion/OnionRouter.cs:314` and `:651` (`Random.Shared.Next(50, 501)`).
-- **What:** relay-path hop selection and the per-hop 50–500 ms mixing delay both draw from the predictable `Random.Shared` PRNG. Path predictability is the more security-relevant of the two.
-- **Impact:** a predictable relay-selection RNG is a deanonymization aid; the README advertises the mixing delay as a traffic-analysis countermeasure but it is not crypto-random.
-- **Fix:** use `System.Security.Cryptography.RandomNumberGenerator.GetInt32` for both the delay and the Fisher–Yates shuffle / bucket-and-node picks.
-
-### BUG-M2 — no Sybil cost, no IP-diversity bucket limits, no liveness check on k-bucket insert
-- **Reported ⚠️**
-- **Where:** `KBucket.TryAdd:37`, `RoutingTable.TryAddNode:26`, `KademliaDhtNode.cs:959`.
-- **What:** nodes are admitted to k-buckets on any received message or `FIND_NODE` response with no proof-of-work, no per-`/16` or per-IP diversity cap, and no pre-insertion PING. Node IDs are free to mint (keypair generation).
-- **Impact:** combined with BUG-H1 this makes routing-table poisoning cheap and scalable.
-- **Fix:** cap entries per IP-prefix within a bucket; verify liveness (PING) before admitting to a full/near-full bucket; consider a modest PoW on node ID.
-
-### BUG-M3 — received files are written world-readable
-- **Reported ⚠️**
-- **Where:** `src/Bootstrapper/Susurri.CLI/Downloads.cs:15` (`Directory.CreateDirectory`, no `RestrictDirectory`), `:26` (`File.WriteAllBytes`, default umask).
-- **What:** unlike every other local store (history/contacts/groups/keys chmod 0700), the downloads directory and saved files use default permissions (~0644 / 0755).
-- **Impact:** decrypted, potentially sensitive received files are readable by other local users on a shared machine.
-- **Fix:** call `LocalEncryption.RestrictDirectory(target)` on the directory and `File.SetUnixFileMode(path, UserRead | UserWrite)` (0600) on each saved file.
-
-### BUG-M4 — group state persisted in plaintext when no store key is present
-- **Reported ⚠️**
-- **Where:** `src/Modules/DHT/Susurri.Modules.DHT.Core/.../GroupManager.cs:279-282` (`SaveGroup` writes unencrypted `.grp` when `_storageKey == null`; `LoadGroups` will read such files).
-- **What:** the group symmetric key and roster are written to disk in the clear whenever `_storageKey` is null, and `_storageKey` is null-defaulted through the `ChatService` constructor chain — a latent footgun.
-- **Impact:** group keys can hit disk unencrypted, defeating the at-rest guarantee for group secrecy.
-- **Fix:** refuse to persist (or require an explicit ephemeral key) when no storage key is available, rather than silently writing plaintext.
-
-### BUG-M5 — `send` reports success even when delivery fails
-- **Reported ⚠️**
-- **Where:** `src/Bootstrapper/Susurri.CLI/Commands/SendCommand.cs:41-47` — always takes the `Conversations` path and prints "Sent (see 'chats')"; the real send result is discarded. The `_session.Conversations == null` fallback branch that would report failure is unreachable (`Conversations` is always set at login).
-- **What:** the CLI gives positive delivery feedback unconditionally; the actual status/ACK state machine exists but is surfaced only in the TUI.
-- **Impact:** users believe a message was delivered when it silently failed (unreachable recipient, dropped onion path) — a correctness/trust bug for a messenger.
-- **Fix:** surface the send/ACK result inline in `send` (Sending → Sent → Acknowledged → Failed); remove the dead fallback branch.
-
-### BUG-M6 — deploy bypasses the NuGet lockfile
-- **Reported ⚠️**
-- **Where:** `.github/workflows/deploy-bootstrap.yml:40` publishes with `/p:RestoreLockedMode=false`.
-- **What:** CI validates against committed `packages.lock.json` (locked mode), but the deploy job disables it, so the **deployed** bootstrap binary can resolve a different package set than the one audited.
-- **Impact:** the running seed can drift from the reviewed/audited dependency graph — a supply-chain integrity gap on the most trust-sensitive node.
-- **Fix:** restore in locked mode in the deploy job too; fix the underlying RID-restore issue that motivated the override instead of disabling the guard.
-
-### BUG-M7 — a routing test is permanently skipped, masking a possible real defect
-- **Reported ⚠️** (note: prior audit memory claims the underlying XOR-distance sort bug was fixed; the exclusion may be stale — either way it is a defect to resolve)
-- **Where:** `RoutingTableTests.FindClosestNodes_ReturnsNodesOrderedByDistance`, `--filter`-excluded in `.github/workflows/build.yml:54`, `scripts/check-coverage.sh:68`, and the non-Linux test step.
-- **What:** the test is excluded from every CI path. It exercises XOR-distance ordering in the routing table — core DHT correctness.
-- **Impact:** either a real ordering bug is being hidden, or a fixed bug's exclusion was never removed (dead config that also drops coverage of a critical path).
-- **Fix:** un-skip, run it; if green, delete all three exclusions; if red, fix the ordering defect.
+### BUG-L4 (residual) — store corruption is quarantined but never surfaced
+- **Fixed since the audit:** corrupt vs missing is now distinguished — decrypt
+  failures quarantine the file (`Security/LocalEncryption.cs` `QuarantineCorrupt`;
+  used by `HistoryStore`, `ContactBook`, `GroupManager`).
+- **Still open:** every caller ignores the quarantine path — nothing is shown to
+  the user, so a tampering signal stays invisible. `Tui/ConversationStore.cs`
+  still swallows all exceptions silently on history save and group send.
+- **Fix:** surface "store was corrupt, moved to <path>" in the UI/log on load;
+  report (or at least log) history-save and group-send failures.
 
 ---
 
-## LOW
+## FIXED (re-verified in source, 2026-08-22)
 
-### BUG-L1 — file-transfer Accept/Reject not bound to the counterparty identity
-- **Reported ⚠️**
-- **Where:** `src/Modules/DHT/Susurri.Modules.DHT.Core/Services/FileTransferService.cs:449` (`HandleTransferAcceptAsync`), `:464` (`HandleTransferReject`).
-- **What:** these act on any signed message matching the `TransferId` without checking the sender equals the transfer's counterparty. A third party who learns a `TransferId` could cancel a transfer or trigger chunk emission. Mitigated only by the 128-bit random GUID.
-- **Fix:** verify `accept/reject.SenderPublicKey` equals the transfer's counterparty key before acting.
-
-### BUG-L2 — TCP relay and UDP reassembly lack per-peer limits
-- **Reported ⚠️**
-- **Where:** `.../Network/RelayService.cs:280-328` (no per-IP request rate limit; forwards to any routing-table node), `.../Network/UdpEndpoint.cs:38,475` (`_inbound` reassembly keyed by `sender:messageId`, only a 15 s sweep, no per-sender cap).
-- **What:** transient memory growth from spoofed sources; TCP relay has circuit caps but no per-IP rate limit.
-- **Fix:** per-source rate limiting and a cap on concurrent in-flight reassemblies per sender.
-
-### BUG-L3 — unbounded local collections not covered by `SecurityLimits`
-- **Reported ⚠️**
-- **Where:** `.../Contacts/ContactBook.cs:75` (`Add`, no size cap); `SecurityLimits` bounds messages/values/usernames/paths/offline-per-user but not routing-table size, contact-book size, or group member count (group roster only de-facto bounded to 1024 via wire `MaxRosterSize`).
-- **What:** local/user-driven unbounded growth. Low impact (not remote-triggered) but inconsistent with the rest of the bounding discipline.
-- **Fix:** add explicit caps to `SecurityLimits` and enforce in `ContactBook` / `GroupInfo`.
-
-### BUG-L4 — silent broad `catch` blocks mask local-store corruption
-- **Reported ⚠️**
-- **Where:** `HistoryStore.cs:56`, `ContactBook.cs:160`, `GroupManager.cs:92,265`, `ConversationStore.cs:115,243` — swallow all exceptions and return empty.
-- **What:** a corrupted or tampered local store silently degrades to blank state instead of alerting; "missing" and "corrupt/decrypt-failed" are indistinguishable.
-- **Impact:** stealthy local data loss; a decrypt failure (possible tampering signal) is hidden.
-- **Fix:** distinguish "missing" from "corrupt/decrypt-failed" and surface the latter.
-
-### BUG-L5 — incoming message output corrupts the in-progress input line
-- **Reported ⚠️**
-- **Where:** `ConsoleUi.PrintIncoming` writes directly to stdout while the user is mid-line in `ReadLineAsync` (interactive REPL).
-- **What:** an inbound message printed during typing garbles the line being composed.
-- **Impact:** UX/robustness defect in the primary messaging loop.
-- **Fix:** redraw the readline buffer after async output, or route incoming messages to a live pane / dedicated region.
-
----
-
-## DESIGN-LEVEL (track, not a quick fix)
-
-### DESIGN-1 — no traffic-analysis resistance (no cover traffic / mixing / batching)
-- **Verified ✅** (grep for cover/dummy/decoy/batch/mix is empty)
-- **What:** timing-correlation resistance rests solely on the per-hop 50–500 ms delay (weak RNG — see BUG-M1) plus 16 KB size padding. File chunks are emitted sequentially with no source-side inter-chunk jitter, so a global observer can count/size-correlate a transfer end-to-end.
-- **Action:** add to `KNOWN-LIMITATIONS.md` (currently absent); evaluate cover traffic / batching / per-chunk jitter as a future phase. This is a stated-scope limitation, not a code defect — but it should be documented honestly like the other threat-model gaps.
+- **BUG-H1 — DHT node IDs not bound to their public key.** Fixed: all insertion
+  sites funnel through `RoutingTable.TryAddNode`, which rejects any node whose
+  `Id != KademliaId.FromPublicKey(EncryptionPublicKey)` (`RoutingTable.cs`
+  `IsIdBoundToKey`).
+- **BUG-M1 — onion path selection / mixing delay used `Random.Shared`.** Fixed:
+  `RandomNumberGenerator.GetInt32` everywhere (`RoutingTable.cs`,
+  `OnionRouter.cs`); no `Random.Shared` left in `src`.
+- **BUG-M3 — received files world-readable.** Fixed: `Downloads.cs` restricts the
+  directory (`LocalEncryption.RestrictDirectory`) and chmods files 0600.
+- **BUG-M4 — group state persisted in plaintext without a store key.** Fixed:
+  `GroupManager.SaveGroup` refuses to write when `_storageKey == null`; only
+  encrypted `.grpe` is written, legacy `.grp` migrated then shredded. Note: keyless
+  sessions now silently skip persistence — acceptable, but worth a log line.
+- **BUG-M5 — `send` reported success unconditionally.** Fixed: `SendCommand`
+  surfaces failure and distinguishes Sent vs Acknowledged via `WaitForAckAsync`.
+- **BUG-M6 — deploy bypassed the NuGet lockfile.** Fixed 2026-08-22: all publish
+  RIDs (`linux-x64;win-x64;osx-x64;osx-arm64`) are declared in
+  `Directory.Build.props` so lock files carry the full RID graph; lock files
+  regenerated; every `/p:RestoreLockedMode=false` removed from
+  `deploy-bootstrap.yml` and `release.yml`. Deploy and release now restore in
+  locked mode against the audited graph.
+- **BUG-M7 — routing test permanently skipped.** Fixed: no `--filter` exclusions
+  remain in CI or `scripts/check-coverage.sh`; the test runs and passes.
+- **BUG-L1 — file-transfer Accept/Reject not bound to counterparty.** Fixed:
+  sender key checked against the transfer counterparty on accept, reject, and
+  chunks (`FileTransferService.cs`).
+- **BUG-L2 — TCP relay / UDP reassembly lacked per-peer limits.** Fixed: per-IP
+  token bucket in `RelayService`, `MaxReassembliesPerSender = 64` in
+  `UdpEndpoint`.
+- **BUG-L3 — unbounded local collections.** Fixed: `SecurityLimits` adds
+  `MaxBucketNodesPerPrefix`, `MaxContacts = 4096`, `MaxGroupMembers = 1024`,
+  enforced in `ContactBook` and `GroupManager`. (Routing-table size remains
+  implicitly bounded at k × 256 buckets.)
+- **BUG-L5 — incoming output corrupted the input line.** Fixed: incoming prints
+  are wrapped in `ConsoleLineReader.Shared.WriteInterrupting`, which erases and
+  redraws prompt + buffer. Note: `ConsoleUi.PrintIncoming` itself is still a raw
+  write — any future unwrapped caller would regress this.
+- **DESIGN-1 — no traffic-analysis resistance.** Documented as a stated-scope
+  limitation in `KNOWN-LIMITATIONS.md` ("No traffic-analysis resistance"), with
+  rationale and deferral target. Cover traffic / batching / per-chunk jitter
+  remain future work.
 
 ---
 
@@ -163,11 +130,11 @@ is lost. Detail lives in the maturity report; move to issues/roadmap as appropri
 - Entire Users module (`src/Modules/Users/*`: EF Core + Npgsql) — loaded but `IUserRepository` never resolved; `ConnectionStrings:UsersDb` defaults empty. RUN.md calls it legacy.
 - IAM CQRS login path + `NodeServer` line-protocol server — used only by the Windows WPF demo.
 - `NodeServerRunningCheck` health check misnamed — actually probes the Kademlia node.
-- `SendCommand` fallback branch (see BUG-M5) unreachable.
+- ~~`SendCommand` fallback branch unreachable~~ — resolved with BUG-M5.
 
 **Feature backlog (enhancements, not bugs — ranked by user value)**
-1. Inline delivery feedback in `send` (overlaps BUG-M5).
-2. Non-interleaving input / live pane (overlaps BUG-L5).
+1. ~~Inline delivery feedback in `send`~~ — done (BUG-M5).
+2. ~~Non-interleaving input / live pane~~ — done (BUG-L5).
 3. Reconnect / offline→online resend queue after network loss.
 4. Identity + history backup/restore (encrypted export).
 5. Tor/SOCKS5 transport option (hide entry-hop IP).
